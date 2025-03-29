@@ -22,7 +22,6 @@ library(astsa)
 library(tseries)
 ```
 
-Just for git testing.
 
 # 1. EDA
 ```{r}
