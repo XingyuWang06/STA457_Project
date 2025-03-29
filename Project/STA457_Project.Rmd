@@ -1,0 +1,152 @@
+---
+title: "STA457 Project"
+author: "Xing Yu Wang"
+date: "2025-03-29"
+output: pdf_document
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+```{r, message=FALSE}
+install.packages("forecast")
+install.packages("astsa")
+
+library(dplyr)
+library(tidyverse)
+library(readr)
+library(lubridate)
+library(forecast)
+library(astsa)
+library(tseries)
+```
+
+
+# 1. EDA
+```{r}
+price = read.csv("./Daily Prices_ICCO.csv")
+weather = read.csv("./Ghana_data.csv")
+```
+
+## 1.1 Clean Data
+```{r}
+weather <- weather |> select(DATE, TAVG)
+exchangerate <- USD_GHS_Historical_Data |> select(Date, Price)
+```
+
+```{r}
+colnames(price)[colnames(price) == 'ICCO.daily.price..US..tonne.'] <- 'Daily_Price'
+colnames(weather)[colnames(weather) == 'DATE'] <- 'Date'
+colnames(weather)[colnames(weather) == 'TAVG'] <- 'Avg_Temp'
+colnames(exchangerate)[colnames(exchangerate) == 'Price'] <- 'exchange_rate'
+```
+
+## 1.2 Check duplicated values
+```{r}
+price |> group_by(Date) |> filter(n() > 1) |> ungroup()
+```
+
+```{r}
+price <- price |> filter(!(Date == "31/01/2024" & Daily_Price == "10,888.05"))
+price <- price |> filter(!(Date == "30/01/2024" & Daily_Price == "10,676.42"))
+price <- distinct(price)
+```
+
+## 1.3 Convert to Time Series Data
+### 1.3.1 price Dataset
+```{r}
+price$Date <- as.Date(price$Date, format="%d/%m/%Y")
+price$Daily_Price <- as.numeric(gsub(",", "", price$Daily_Price))
+price_month <- price |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
+  summarise(Daily_Price = mean(Daily_Price, na.rm = TRUE)) |> ungroup()
+```
+
+```{r}
+price_ts <- ts(price_month$Daily_Price, start = c(1994, 11), end = c(2024, 11), frequency = 12)
+```
+
+```{r}
+plot(price_ts, main="Monthly Price Time Series", ylab="Price", xlab="Time")
+```
+
+```{r}
+acf2(price_ts, 50)
+```
+
+```{r}
+ndiffs(price_ts)
+```
+
+```{r}
+price_month$price_log <- log(price_month$Daily_Price)
+diff_log_price = diff(price_month$price_log)
+```
+
+```{r}
+ts.plot(diff_log_price, main = "Log Differenced Price Data", ylab = "Log Differenced Price")
+```
+```{r}
+adf.test(diff_log_price)
+```
+```{r}
+acf2(diff_log_price, 50)
+```
+
+
+
+### 1.3.2 ghana Dataset
+```{r}
+weather$Date <- as.Date(weather$Date)
+weather$Avg_Temp <- as.numeric(gsub("", "", weather$Avg_Temp))
+weather_month <- weather |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
+  summarise(Avg_Temp = mean(Avg_Temp, na.rm = TRUE)) |> ungroup()
+```
+
+```{r}
+weather_ts <- ts(weather_month$Avg_Temp, start = c(1994, 11), end = c(2024, 11), frequency = 12)
+```
+
+```{r}
+ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
+```
+
+## exchange Data
+```{r}
+exchangerate$Date <- as.Date(exchangerate$Date)
+exchangerate$exchange_rate <- as.numeric(gsub("", "", exchangerate$exchange_rate))
+rate_month <- exchangerate |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
+  summarise(exchange_rate = mean(exchange_rate, na.rm = TRUE)) |> ungroup()
+```
+
+```{r}
+rate_ts <- ts(rate_month$exchange_rate, start = c(1994, 11), end = c(2024, 11), frequency = 12)
+```
+
+```{r}
+ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
+```
+
+## Combine and Split data
+```{r}
+data <- price |> left_join(weather, by = "Date") |> left_join(exchangerate, by = "Date")
+data <- data |> mutate(log_price = log(price_month$Daily_Price), diff_log_price = 
+                         c(NA, diff(price_month$price_log))) |> drop_na()
+```
+
+```{r}
+set.seed(889)
+
+housing_clean = housing_clean[sample(nrow(housing_clean), 2000),]
+sample_size <- floor(0.6 * nrow(housing_clean))
+train_indices <- sample(seq_len(nrow(housing_clean)), size = sample_size)
+trainSet <- housing_clean[train_indices, ]
+testSet <- housing_clean[-train_indices, ]
+```
+
+
+
+
+
+
+
