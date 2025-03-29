@@ -146,7 +146,7 @@ testSet <- housing_clean[-train_indices, ]
 
 
 
-
+## Model 1: ARIMA
 
 
 
