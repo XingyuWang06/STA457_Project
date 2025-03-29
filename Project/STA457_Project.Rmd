@@ -132,6 +132,7 @@ ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchang
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
 data <- data |> mutate(log_price = log(Daily_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
+data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price)
 ```
 
 ```{r}
