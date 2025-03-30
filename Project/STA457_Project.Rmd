@@ -133,6 +133,8 @@ data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_m
 data <- data |> mutate(log_price = log(Daily_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
 data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price)
+
+data$Time <- as.Date(data$Time)
 ```
 
 ```{r}
@@ -144,11 +146,17 @@ trainSet <- data[train_indices, ]
 testSet <- data[-train_indices, ]
 ```
 
+```{r}
+data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
+```
 
 
 <<<<<<< HEAD
 # 2. Method
 ## 2.1 ETS Model
+```{r}
+
+```
 
 
 =======
