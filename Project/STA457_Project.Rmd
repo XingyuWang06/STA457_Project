@@ -6,7 +6,7 @@ output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", out.width = "75%")
 ```
 
 ```{r, message=FALSE}
@@ -21,6 +21,7 @@ library(forecast)
 library(astsa)
 library(tseries)
 library(mgcv)
+library(vars)
 ```
 
 
@@ -28,6 +29,7 @@ library(mgcv)
 ```{r}
 price = read.csv("./Daily Prices_ICCO.csv")
 weather = read.csv("./Ghana_data.csv")
+USD_GHS_Historical_Data = read.csv("./USD_GHS Historical Data.csv")
 ```
 
 ## 1.1 Clean Data
@@ -191,23 +193,40 @@ data$Time <- as.Date(data$Time)
 ```
 
 ```{r}
-set.seed(889)
-
-sample_size <- floor(0.7 * nrow(data))
-train_indices <- sample(seq_len(nrow(data)), size = sample_size)
-trainSet <- data[train_indices, ]
-testSet <- data[-train_indices, ]
+data <- data[order(data$Time), ]
+cutoff <- floor(0.7 * nrow(data))
+trainSet <- data[1:cutoff, ]
+testSet <- data[(cutoff+1):nrow(data), ]
 ```
 
 ```{r}
 data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 ```
 
+## 1.6 Stationarity check and Decomposition
+```{r}
+adf.test(data$month_Price)
+```
+
+```{r}
+adf.test(data$log_price)
+```
+
+
+```{r}
+adf.test(data$diff_log_price)
+```
+
+Since only the diff_log_price is stationary, we choose differenced monthly log price when fitting the model.
+
 ```{r}
 diff_price_ts <- ts(data$diff_log_price, frequency = 12)
-diff_price_ts_components <- decompose(diff_price_ts)
-plot(diff_price_ts_components)
+autoplot(decompose(diff_price_ts, type="additive")) +
+  ggtitle("Decomposition of Differenced Log Price Time Series") +
+  theme_minimal()
 ```
+
+
 
 
 # 2. Method
@@ -292,6 +311,10 @@ summary(arimax_model)
 ```
 
 ```{r}
+AIC(arimax_model)
+```
+
+```{r}
 checkresiduals(arimax_model)
 ```
 
@@ -300,62 +323,52 @@ Fail to reject $H_0$, hence residuals of this plot do not show significant autoc
 ### 2.2.2 Forecasting With ARIMAX Model
 
 ```{r}
-# Randomly sample 5 rows from testSet for exogenous variables
-set.seed(123)  # For reproducibility
-random_rows <- sample(nrow(testSet), 15)
-
-# Create future xreg from randomly sampled rows
+# Create future xreg from test set
 forecast_arimax_xreg <- cbind(testSet$Avg_Temp, testSet$exchange_rate)
 
 # Ensure column names match the original xreg
 colnames(forecast_arimax_xreg) <- c("Avg_Temp", "exchange_rate")
 
-# Forecast using randomly selected xreg
-forecast_arimax <- predict(arimax_model, newdata=testSet, newxreg=forecast_arimax_xreg)
-```
+# Forecast using the ARIMAX model with xreg
+forecast_arimax <- forecast(arimax_model, xreg = forecast_arimax_xreg)
 
+# Assuming your model was trained on log_price, use the last log_price from the training set
+last_log_price <- tail(trainSet$log_price, 1)
 
-```{r}
-# last_log_price <- tail(trainSet$log_price , 1)
-forecasted_log_price_arimax <- cumsum(forecast_arimax$mean) + last_log_price
+# Convert the forecasted log prices back to actual prices
+forecasted_price_arimax <- exp(cumsum(forecast_arimax$mean) + last_log_price)
 
-# Convert back to actual price
-forecasted_price_arimax <- exp(forecasted_log_price_arimax)
-actual_price_arimax <- testSet$month_Price
+# Get actual prices from the test set
+actual_price_arimax <- exp(cumsum(testSet$diff_log_price) + last_log_price)
 
-forecast_arimax_ts <- ts(forecasted_price_arimax, start = start(data_test_ts), frequency = 12)
-actual_arimax_ts <- ts(actual_price_arimax, start = start(data_test_ts), frequency = 12)
-```
+# Create time series objects with the correct start point and frequency
+forecast_arimax_ts <- ts(forecasted_price_arimax, start = start(testSet$Time), frequency = 12)
+actual_arimax_ts <- ts(actual_price_arimax, start = start(testSet$Time), frequency = 12)
 
-```{r}
-# Plot using actual price
+# Plot forecast vs actual prices
 autoplot(forecast_arimax_ts, series = "Predicted") + 
   autolayer(actual_arimax_ts, series = "Actual", color = "blue") +
-  ggtitle("Forecast vs Actual Prices") +
+  ggtitle("ARIMAX: Forecast vs Actual Prices") +
   ylab("Price") +
   xlab("Time") +
   theme_minimal()
 ```
 
 
-## 2.3 VAR model
-```{r}
-library(vars)
-library(dplyr)
-library(forecast)
-```
 
-```{r}
+
+```{r include=FALSE}
+## 2.3 VAR model (not using this part)
+# Not a very reliable model for our dataset :).
+
 # Prepare the data: price, exchange rate, and average temperature
 var_data <- trainSet %>% dplyr::select(where(is.numeric))
 VARselect(var_data, lag.max = 10, type = "const")
 var_model <- VAR(var_data, p=1, type="const")
 summary(var_model)
 ```
-Not a very reliable model for our dataset :).
 
-```{r}
-library(forecast)
+```{r include=FALSE}
 var_data <- trainSet %>% dplyr::select(where(is.numeric))
 xreg_matrix <- as.matrix(cbind(var_data$Avg_Temp, var_data$exchange_rate))
 
@@ -364,25 +377,15 @@ adf.test(var_data$diff_log_price)
 armax_model <- auto.arima(var_data$diff_log_price, xreg = xreg_matrix, d=0)
 summary(armax_model)
 ```
-not sure if this is the right way to fit ARMAX model, cuz in the book they are actually using an example of VAR under Multivariate ARMAX section.
 
-```{r}
+```{r include=FALSE}
 plot(var_data$diff_log_price, type="l")
 ```
 
 
-```{r}
+```{r include=FALSE}
 summary(xreg_matrix)
 cor(xreg_matrix)
-```
-
-```{r}
-library(TSA)
-library(forecast)
-air.m1<-arimax(log(airmiles),order=c(0,0,1),
-              xtransf=data.frame(I911=1*(seq(airmiles)==69)),
-              transfer=list(c(1,0))
-              )
 ```
 
 ## 2.5 GAM Model
@@ -420,6 +423,7 @@ summary(gam_complex)
 ```{r}
 plot(gam_complex, pages = 1, shade = TRUE)
 ```
+
 ```{r}
 gam.check(gam_complex) 
 ```
