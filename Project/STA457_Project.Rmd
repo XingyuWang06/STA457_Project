@@ -20,6 +20,7 @@ library(lubridate)
 library(forecast)
 library(astsa)
 library(tseries)
+library(mgcv)
 ```
 
 
@@ -31,8 +32,8 @@ weather = read.csv("./Ghana_data.csv")
 
 ## 1.1 Clean Data
 ```{r}
-weather <- weather |> select(DATE, TAVG)
-exchangerate <- USD_GHS_Historical_Data |> select(Date, Price)
+weather <- weather |> dplyr::select(DATE, TAVG)
+exchangerate <- USD_GHS_Historical_Data |> dplyr::select(Date, Price)
 ```
 
 ```{r}
@@ -59,11 +60,15 @@ price <- distinct(price)
 price$Date <- as.Date(price$Date, format="%d/%m/%Y")
 price$Daily_Price <- as.numeric(gsub(",", "", price$Daily_Price))
 price_month <- price |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
-  summarise(Daily_Price = mean(Daily_Price, na.rm = TRUE)) |> ungroup()
+  summarise(month_Price = mean(Daily_Price, na.rm = TRUE)) |> ungroup()
 ```
 
 ```{r}
-price_ts <- ts(price_month$Daily_Price, start = c(1994, 11), end = c(2024, 11), frequency = 12)
+summary(price)
+```
+
+```{r}
+price_ts <- ts(price_month$month_Price, start = c(1994, 11), end = c(2024, 11), frequency = 12)
 ```
 
 ```{r}
@@ -79,7 +84,7 @@ ndiffs(price_ts)
 ```
 
 ```{r}
-price_month$price_log <- log(price_month$Daily_Price)
+price_month$price_log <- log(price_month$month_Price)
 diff_log_price = diff(price_month$price_log)
 ```
 
@@ -93,14 +98,16 @@ adf.test(diff_log_price)
 acf2(diff_log_price, 50)
 ```
 
-
-
 ### 1.3.2 ghana Dataset
 ```{r}
 weather$Date <- as.Date(weather$Date)
 weather$Avg_Temp <- as.numeric(gsub("", "", weather$Avg_Temp))
 weather_month <- weather |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
   summarise(Avg_Temp = mean(Avg_Temp, na.rm = TRUE)) |> ungroup()
+```
+
+```{r}
+summary(weather_month)
 ```
 
 ```{r}
@@ -120,10 +127,24 @@ rate_month <- exchangerate |> mutate(Time = floor_date(Date, "month")) |> group_
 ```
 
 ```{r}
+summary(exchangerate)
+```
+
+```{r}
 rate_ts <- ts(rate_month$exchange_rate, start = c(1994, 11), end = c(2024, 11), frequency = 12)
 ```
 
 ```{r}
+ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
+```
+
+```{r}
+par(mfrow=c(3,1), mar = c(3, 4, 2, 2))
+# price
+plot(price_ts, main="Monthly Price Time Series", ylab="Price", xlab="Time")
+#temperature
+ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
+# exchange rate
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
 
@@ -140,14 +161,29 @@ ggtsdisplay(weather_ts, main="Time series plot for Monthly Average Temperature")
 ggtsdisplay(rate_ts, main="Time series plot for Monthly Average Exchange Rate(USD/GHS)")
 ```
 
+```{r}
+par(mfrow=c(3,1), mar = c(3, 4, 2, 2))
+# price
+plot(price_ts, main="Monthly Price Time Series", ylab="Price", xlab="Time")
+#temperature
+ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
+# exchange rate
+ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
+```
 
+## Combine and Split data
 ```{r}
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
-data <- data |> mutate(log_price = log(Daily_Price), diff_log_price = 
+data <- data |> mutate(log_price = log(month_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
-data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price)
+data <- data |> dpyler::select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
 
 data$Time <- as.Date(data$Time)
+```
+
+```{r}
+plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
+     main = "Daily Price vs. Avg Temperature")
 ```
 
 ```{r}
@@ -176,8 +212,9 @@ summary(ets_zmodel)
 ```
 ETS(A,N,N) is the best model.
 
-### 2.1.2 Forecasting
+### 2.1.2 Forecasting and Plotting
 ```{r}
+# Plot using log differenced price
 data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
                    frequency = 12)
 
@@ -188,10 +225,38 @@ autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red
 ```
 The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
 
+```{r}
+last_log_price <- tail(trainSet$log_price , 1)
+forecasted_log_price <- cumsum(forecast_ets$mean) + last_log_price
+
+# Convert back to actual price
+forecasted_price <- exp(forecasted_log_price)
+
+actual_price <- exp(testSet$log_price)
+```
+
+```{r}
+data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
+                   frequency = 12)
+
+forecast_ets_ts <- ts(forecasted_price, start = start(data_test_ts), frequency = 12)
+actual_ets_ts <- ts(actual_price, start = start(data_test_ts), frequency = 12)
+```
+
+```{r}
+# Plot using actual price
+autoplot(forecast_ets_ts, series = "Predicted") + 
+  autolayer(actual_ets_ts, series = "Actual", color = "blue") +
+  ggtitle("Forecast vs Actual Prices") +
+  ylab("Price") +
+  xlab("Time") +
+  theme_minimal()
+```
+
 ## 2.2 ARIMAX Model
 
 ```{r}
-adf.test(price_month$price_log)
+adf.test(trainSet$diff_log_price)
 ```
 
 ```{r}
@@ -206,7 +271,6 @@ acf2(trainSet$diff_log_price, 50)
 
 ## 2.3 VAR model
 ```{r}
-# install.packages("vars")
 library(vars)
 library(dplyr)
 library(forecast)
@@ -220,7 +284,6 @@ var_model <- VAR(var_data, p=1, type="const")
 summary(var_model)
 ```
 Not a very reliable model for our dataset :).
-
 
 ```{r}
 library(forecast)
@@ -252,6 +315,48 @@ air.m1<-arimax(log(airmiles),order=c(0,0,1),
               transfer=list(c(1,0))
               )
 ```
+
+## 2.5 GAM Model
+### 2.5.1 Fit Model
+#### 2.5.1.1 Basic Model
+```{r}
+# Uses simple smoothing splines for variables
+trainSet$Time_num <- as.numeric(trainSet$Time)
+
+gam_basic <- gam(diff_log_price ~ s(Time_num) + s(Avg_Temp) + s(exchange_rate), 
+                 data = trainSet, method = "REML")
+```
+
+```{r}
+gam.check(gam_basic)
+```
+
+#### 2.5.1.2 Complex Model
+```{r}
+# Fit GAM model with smooth trend, random effects, and seasonality
+trainSet$dateInt = as.integer(trainSet$Time)
+trainSet$monthFac <- factor(format(trainSet$Time, "%m"))
+gam_complex <- gam(diff_log_price ~ s(dateInt, k = 100) + s(monthFac, bs = "re") + 
+                     sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
+                     sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
+                     s(Avg_Temp) + s(exchange_rate), data = trainSet, 
+                   method = "REML", optimizer = "efs")
+```
+
+```{r}
+summary(gam_basic)
+summary(gam_complex)
+```
+
+```{r}
+plot(gam_complex, pages = 1, shade = TRUE)
+```
+```{r}
+gam.check(gam_complex) 
+```
+
+
+
 
 
 
