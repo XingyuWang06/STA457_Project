@@ -150,8 +150,6 @@ testSet <- data[-train_indices, ]
 data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 ```
 
-
-<<<<<<< HEAD
 # 2. Method
 ## 2.1 ETS Model
 ETS is a purely univariate model and cannot directly handle external regressors.
@@ -165,6 +163,7 @@ summary(ets_zmodel)
 ```
 ETS(A,N,N) is the best model.
 
+<<<<<<< HEAD
 ### 2.1.2 Forecasting
 ```{r}
 data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
@@ -176,10 +175,13 @@ forecast_ets <- forecast(ets_model, h = h)
 autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red")
 ```
 The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
-
 =======
-## Model 1: ARIMA
->>>>>>> f77c156c4cf28a4f2c00e9c67129d6392a6459d2
+## 2.2 ARIMA Model
+>>>>>>> c2884286efa75e995485ea3383a0f60ac38f463b
+
+## 2.3 SARIMA Model
+
+## 2.4 ARMAX Model
 
 
 
