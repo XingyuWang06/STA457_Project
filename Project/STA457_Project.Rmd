@@ -10,8 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r, message=FALSE}
-install.packages("forecast")
-install.packages("astsa")
+# install.packages("forecast")
+# install.packages("astsa")
 
 library(dplyr)
 library(tidyverse)
@@ -20,6 +20,7 @@ library(lubridate)
 library(forecast)
 library(astsa)
 library(tseries)
+library(mgcv)
 ```
 
 
@@ -59,11 +60,15 @@ price <- distinct(price)
 price$Date <- as.Date(price$Date, format="%d/%m/%Y")
 price$Daily_Price <- as.numeric(gsub(",", "", price$Daily_Price))
 price_month <- price |> mutate(Time = floor_date(Date, "month")) |> group_by(Time) |> 
-  summarise(Daily_Price = mean(Daily_Price, na.rm = TRUE)) |> ungroup()
+  summarise(month_Price = mean(Daily_Price, na.rm = TRUE)) |> ungroup()
 ```
 
 ```{r}
-price_ts <- ts(price_month$Daily_Price, start = c(1994, 11), end = c(2024, 11), frequency = 12)
+summary(price)
+```
+
+```{r}
+price_ts <- ts(price_month$month_Price, start = c(1994, 11), end = c(2024, 11), frequency = 12)
 ```
 
 ```{r}
@@ -79,7 +84,7 @@ ndiffs(price_ts)
 ```
 
 ```{r}
-price_month$price_log <- log(price_month$Daily_Price)
+price_month$price_log <- log(price_month$month_Price)
 diff_log_price = diff(price_month$price_log)
 ```
 
@@ -104,6 +109,10 @@ weather_month <- weather |> mutate(Time = floor_date(Date, "month")) |> group_by
 ```
 
 ```{r}
+summary(weather_month)
+```
+
+```{r}
 weather_ts <- ts(weather_month$Avg_Temp, start = c(1994, 11), end = c(2024, 11), frequency = 12)
 ```
 
@@ -120,6 +129,10 @@ rate_month <- exchangerate |> mutate(Time = floor_date(Date, "month")) |> group_
 ```
 
 ```{r}
+summary(exchangerate)
+```
+
+```{r}
 rate_ts <- ts(rate_month$exchange_rate, start = c(1994, 11), end = c(2024, 11), frequency = 12)
 ```
 
@@ -127,12 +140,29 @@ rate_ts <- ts(rate_month$exchange_rate, start = c(1994, 11), end = c(2024, 11), 
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
 
+```{r}
+par(mfrow=c(3,1), mar = c(3, 4, 2, 2))
+# price
+plot(price_ts, main="Monthly Price Time Series", ylab="Price", xlab="Time")
+#temperature
+ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
+# exchange rate
+ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
+```
+
+```{r}
+plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
+     main = "Daily Price vs. Avg Temperature",
+     pch = 16)
+```
+
+
 ## Combine and Split data
 ```{r}
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
-data <- data |> mutate(log_price = log(Daily_Price), diff_log_price = 
+data <- data |> mutate(log_price = log(month_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
-data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price)
+data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
 
 data$Time <- as.Date(data$Time)
 ```
@@ -207,6 +237,7 @@ autoplot(forecast_ets_ts, series = "Predicted") +
 
 
 
+
 =======
 ## 2.2 ARIMA Model
 >>>>>>> c2884286efa75e995485ea3383a0f60ac38f463b
@@ -214,6 +245,48 @@ autoplot(forecast_ets_ts, series = "Predicted") +
 ## 2.3 SARIMA Model
 
 ## 2.4 ARMAX Model
+
+## 2.5 GAM Model
+### 2.5.1 Fit Model
+#### 2.5.1.1 Basic Model
+```{r}
+# Uses simple smoothing splines for variables
+trainSet$Time_num <- as.numeric(trainSet$Time)
+
+gam_basic <- gam(diff_log_price ~ s(Time_num) + s(Avg_Temp) + s(exchange_rate), 
+                 data = trainSet, method = "REML")
+```
+
+```{r}
+gam.check(gam_basic)
+```
+
+#### 2.5.1.2 Complex Model
+```{r}
+# Fit GAM model with smooth trend, random effects, and seasonality
+trainSet$dateInt = as.integer(trainSet$Time)
+trainSet$monthFac <- factor(format(trainSet$Time, "%m"))
+gam_complex <- gam(diff_log_price ~ s(dateInt, k = 100) + s(monthFac, bs = "re") + 
+                     sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
+                     sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
+                     s(Avg_Temp) + s(exchange_rate), data = trainSet, 
+                   method = "REML", optimizer = "efs")
+```
+
+```{r}
+summary(gam_basic)
+summary(gam_complex)
+```
+
+```{r}
+plot(gam_complex, pages = 1, shade = TRUE)
+```
+```{r}
+gam.check(gam_complex) 
+```
+
+
+
 
 
 
