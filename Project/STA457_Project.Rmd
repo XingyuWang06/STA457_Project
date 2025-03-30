@@ -150,18 +150,17 @@ testSet <- data[-train_indices, ]
 data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 ```
 
-
-<<<<<<< HEAD
 # 2. Method
 ## 2.1 ETS Model
 ```{r}
 
 ```
 
+## 2.2 ARIMA Model
 
-=======
-## Model 1: ARIMA
->>>>>>> f77c156c4cf28a4f2c00e9c67129d6392a6459d2
+## 2.3 SARIMA Model
+
+## 2.4 ARMAX Model
 
 
 
