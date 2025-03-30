@@ -85,15 +85,24 @@ ndiffs(price_ts)
 
 ```{r}
 price_month$price_log <- log(price_month$month_Price)
-diff_log_price = diff(price_month$price_log)
+adf.test(price_month$price_log)
 ```
 
 ```{r}
+acf2(price_month$price_log, 50)
+```
+
+Hence, we want to difference the price data.
+
+```{r}
+diff_log_price = diff(price_month$price_log)
 ts.plot(diff_log_price, main = "Log Differenced Price Data", ylab = "Log Differenced Price")
 ```
+
 ```{r}
 adf.test(diff_log_price)
 ```
+
 ```{r}
 acf2(diff_log_price, 50)
 ```
@@ -148,10 +157,11 @@ ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temper
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
 
-## 1.4 Combine and Split data
+## 1.4 Time series plots for data
 ```{r}
 ggtsdisplay(price_ts, main="Time series plot for Monthly World Cocoa Price")
 ```
+
 
 ```{r}
 ggtsdisplay(weather_ts, main="Time series plot for Monthly Average Temperature")
@@ -170,20 +180,14 @@ ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temper
 # exchange rate
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
-
-## Combine and Split data
+## 1.5 Combine and Split data
 ```{r}
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
 data <- data |> mutate(log_price = log(month_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
-data <- data |> dpyler::select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
+data <- data |> dplyr::select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
 
 data$Time <- as.Date(data$Time)
-```
-
-```{r}
-plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
-     main = "Daily Price vs. Avg Temperature")
 ```
 
 ```{r}
@@ -198,6 +202,13 @@ testSet <- data[-train_indices, ]
 ```{r}
 data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 ```
+
+```{r}
+diff_price_ts <- ts(data$diff_log_price, frequency = 12)
+diff_price_ts_components <- decompose(diff_price_ts)
+plot(diff_price_ts_components)
+```
+
 
 # 2. Method
 ## 2.1 ETS Model
@@ -255,17 +266,75 @@ autoplot(forecast_ets_ts, series = "Predicted") +
 
 ## 2.2 ARIMAX Model
 
+Recall that in Section 1.3.1, we have tested the acf and adf.test, and determined that we would be using the differenced price data. To fit the trainset, we evaluate p and q for ARIMA model.
+
 ```{r}
 adf.test(trainSet$diff_log_price)
 ```
 
+
 ```{r}
-acf2(price_month$price_log)
+acf2(trainSet$diff_log_price)
+```
+
+### 2.2.1 Fit ARIMAX Model
+```{r}
+xreg_matrix <- cbind(trainSet$Avg_Temp, trainSet$exchange_rate)
+
+# Assign column names to xreg
+colnames(xreg_matrix) <- c("Avg_Temp", "exchange_rate")
+
+# Fit the SARIMA model with the named xreg
+arimax_model <- Arima(trainSet$diff_log_price, order=c(1,0,1), xreg = xreg_matrix)
+
+# Summary of the model
+summary(arimax_model)
+```
+
+```{r}
+checkresiduals(arimax_model)
+```
+
+Fail to reject $H_0$, hence residuals of this plot do not show significant autocorrelation.
+
+### 2.2.2 Forecasting With ARIMAX Model
+
+```{r}
+# Randomly sample 5 rows from testSet for exogenous variables
+set.seed(123)  # For reproducibility
+random_rows <- sample(nrow(testSet), 15)
+
+# Create future xreg from randomly sampled rows
+forecast_arimax_xreg <- cbind(testSet$Avg_Temp, testSet$exchange_rate)
+
+# Ensure column names match the original xreg
+colnames(forecast_arimax_xreg) <- c("Avg_Temp", "exchange_rate")
+
+# Forecast using randomly selected xreg
+forecast_arimax <- predict(arimax_model, newdata=testSet, newxreg=forecast_arimax_xreg)
 ```
 
 
 ```{r}
-acf2(trainSet$diff_log_price, 50)
+# last_log_price <- tail(trainSet$log_price , 1)
+forecasted_log_price_arimax <- cumsum(forecast_arimax$mean) + last_log_price
+
+# Convert back to actual price
+forecasted_price_arimax <- exp(forecasted_log_price_arimax)
+actual_price_arimax <- testSet$month_Price
+
+forecast_arimax_ts <- ts(forecasted_price_arimax, start = start(data_test_ts), frequency = 12)
+actual_arimax_ts <- ts(actual_price_arimax, start = start(data_test_ts), frequency = 12)
+```
+
+```{r}
+# Plot using actual price
+autoplot(forecast_arimax_ts, series = "Predicted") + 
+  autolayer(actual_arimax_ts, series = "Actual", color = "blue") +
+  ggtitle("Forecast vs Actual Prices") +
+  ylab("Price") +
+  xlab("Time") +
+  theme_minimal()
 ```
 
 
