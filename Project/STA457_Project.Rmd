@@ -10,8 +10,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```
 
 ```{r, message=FALSE}
-install.packages("forecast")
-install.packages("astsa")
+# install.packages("forecast")
+# install.packages("astsa")
 
 library(dplyr)
 library(tidyverse)
