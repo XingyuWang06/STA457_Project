@@ -132,7 +132,7 @@ ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchang
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
 data <- data |> mutate(log_price = log(Daily_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
-data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price)
+data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price)
 
 data$Time <- as.Date(data$Time)
 ```
@@ -164,8 +164,9 @@ summary(ets_zmodel)
 ETS(A,N,N) is the best model.
 
 <<<<<<< HEAD
-### 2.1.2 Forecasting
+### 2.1.2 Forecasting and Plotting
 ```{r}
+# Plot using log differenced price
 data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
                    frequency = 12)
 
@@ -175,6 +176,37 @@ forecast_ets <- forecast(ets_model, h = h)
 autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red")
 ```
 The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
+
+```{r}
+last_log_price <- tail(trainSet$log_price , 1)
+forecasted_log_price <- cumsum(forecast_ets$mean) + last_log_price
+
+# Convert back to actual price
+forecasted_price <- exp(forecasted_log_price)
+
+actual_price <- exp(testSet$log_price)
+```
+
+```{r}
+data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
+                   frequency = 12)
+
+forecast_ets_ts <- ts(forecasted_price, start = start(data_test_ts), frequency = 12)
+actual_ets_ts <- ts(actual_price, start = start(data_test_ts), frequency = 12)
+```
+
+```{r}
+# Plot using actual price
+autoplot(forecast_ets_ts, series = "Predicted") + 
+  autolayer(actual_ets_ts, series = "Actual", color = "blue") +
+  ggtitle("Forecast vs Actual Prices") +
+  ylab("Price") +
+  xlab("Time") +
+  theme_minimal()
+```
+
+
+
 =======
 ## 2.2 ARIMA Model
 >>>>>>> c2884286efa75e995485ea3383a0f60ac38f463b
