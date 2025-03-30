@@ -146,10 +146,14 @@ testSet <- data[-train_indices, ]
 
 
 
+<<<<<<< HEAD
 # 2. Method
 ## 2.1 ETS Model
 
 
+=======
+## Model 1: ARIMA
+>>>>>>> f77c156c4cf28a4f2c00e9c67129d6392a6459d2
 
 
 
