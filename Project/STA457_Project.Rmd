@@ -154,10 +154,28 @@ data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 <<<<<<< HEAD
 # 2. Method
 ## 2.1 ETS Model
+ETS is a purely univariate model and cannot directly handle external regressors.
+
+### 2.1.1 Fit Model
 ```{r}
-
+ets_model <- ets(data_train_ts)
+ets_zmodel <- ets(data_train_ts, model = "ZZZ") # Automatically selects best model
+summary(ets_model)
+summary(ets_zmodel)
 ```
+ETS(A,N,N) is the best model.
 
+### 2.1.2 Forecasting
+```{r}
+data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1), 
+                   frequency = 12)
+
+h <- nrow(testSet)
+forecast_ets <- forecast(ets_model, h = h)
+
+autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red")
+```
+The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
 
 =======
 ## Model 1: ARIMA
