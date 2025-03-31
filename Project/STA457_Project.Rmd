@@ -22,6 +22,7 @@ library(Metrics)
 library(ggplot2)
 library(xgboost)
 # library(XGBClassifier)
+library(rugarch)
 ```
 
 # 1. EDA
@@ -394,6 +395,65 @@ accuracy(forecast_arimax_ts, actual_arimax_ts)
 ```
 
 80% lower and upper bound from forecasts create a tighter bounds for the forecasting the actual price as shown in graph. However, since our price data is non-stationary, and there is a sudden increase towards the end, the ARIMAX model, which relies on historical patterns, struggles to capture this trend, leading to poorer performance on the test set.
+
+
+## 2.3 GARCH Model
+### ARCH/GARCH Model (Monthly)
+```{r}
+garch_spec <- ugarchspec(
+  variance.model = list(model = "sGARCH", garchOrder = c(1, 1)),
+  mean.model = list(armaOrder = c(1, 1), include.mean = TRUE),
+  distribution.model = "norm"
+)
+garch_fit <- ugarchfit(spec = garch_spec, data = trainSet$diff_log_price)
+garch_fit
+```
+
+### 2.3.2 GARCH Forecast
+```{r}
+garch_forecast <- ugarchforecast(garch_fit, n.ahead = length(testSet$diff_log_price))
+last_train_price <- tail(trainSet$month_Price, 1)
+garch_forecast_prices <- last_train_price * exp(cumsum(as.numeric(fitted(garch_forecast))))
+garch_df <- tibble(
+  Date = testSet$Time,
+  Price = garch_forecast_prices
+)
+test_df <- tibble(
+  Date = testSet$Time,
+  Price = testSet$month_Price
+)
+```
+
+```{r}
+ggplot() +
+  geom_line(data = test_df, aes(x = Date, y = Price), color = "black") +
+  geom_line(data = garch_df, aes(x = Date, y = Price), color = "blue") +
+  labs(title = "GARCH Forecast vs Actual Prices (Monthly)", y = "Price", x = "Date") +
+  theme_minimal()
+```
+```{r}
+garch_predicted_vol <- sigma(garch_forecast)
+actual_vol <- abs(testSet$log_price)  # Assuming you have log-returns
+rmse_garch_test <- sqrt(mean((garch_predicted_vol - actual_vol)^2, na.rm = TRUE))
+print(rmse_garch_test)
+```
+
+```{r}
+garch_train_vol <- sigma(garch_fit)
+actual_train_vol <- abs(trainSet$log_price)  # Assuming you have log-returns
+rmse_garch <- sqrt(mean((garch_train_vol - actual_train_vol)^2, na.rm = TRUE))
+print(rmse_garch)
+```
+
+
+```{r}
+train_ts <- ts(trainSet$diff_log_price, start = start(min(trainSet$Time)), frequency = 12)
+garch_fitted_ts <- ts(fitted(garch_fit), start = start(min(trainSet$Time)), frequency = 12)
+plot(train_ts, type='l', col='black', main="Garch: Train Set Log Prices vs Fitted", 
+     ylab="Log Price", xlab="Time")
+lines(garch_fitted_ts, col='red')
+```
+
 
 ## 2.5 GAM Model
 ### 2.5.1 Fit Model
