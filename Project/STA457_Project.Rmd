@@ -10,9 +10,6 @@ knitr::opts_chunk$set(echo = TRUE, fig.align = "center", out.width = "75%")
 ```
 
 ```{r, message=FALSE}
-# install.packages("forecast")
-# install.packages("astsa")
-
 library(dplyr)
 library(tidyverse)
 library(readr)
@@ -21,9 +18,11 @@ library(forecast)
 library(astsa)
 library(tseries)
 library(mgcv)
-library(vars)
+library(Metrics)
+library(ggplot2)
+library(xgboost)
+# library(XGBClassifier)
 ```
-
 
 # 1. EDA
 ```{r}
@@ -164,7 +163,6 @@ ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchang
 ggtsdisplay(price_ts, main="Time series plot for Monthly World Cocoa Price")
 ```
 
-
 ```{r}
 ggtsdisplay(weather_ts, main="Time series plot for Monthly Average Temperature")
 ```
@@ -191,6 +189,13 @@ data <- data |> dplyr::select(Time, Avg_Temp, exchange_rate, diff_log_price, log
 
 data$Time <- as.Date(data$Time)
 ```
+
+```{r}
+plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
+     main = "Daily Price vs. Avg Temperature")
+pairs(data[, c("month_Price", "Avg_Temp", "exchange_rate")])
+```
+
 
 ```{r}
 data <- data[order(data$Time), ]
@@ -227,20 +232,21 @@ autoplot(decompose(diff_price_ts, type="additive")) +
 ```
 
 
-
-
 # 2. Method
 ## 2.1 ETS Model
 ETS is a purely univariate model and cannot directly handle external regressors.
 
 ### 2.1.1 Fit Model
 ```{r}
-ets_model <- ets(data_train_ts)
+ets_model <- ets(data_train_ts, model = "ANA")
 ets_zmodel <- ets(data_train_ts, model = "ZZZ") # Automatically selects best model
 summary(ets_model)
 summary(ets_zmodel)
 ```
-ETS(A,N,N) is the best model.
+
+```{r}
+plot(ets_model)
+```
 
 ### 2.1.2 Forecasting and Plotting
 ```{r}
@@ -256,11 +262,10 @@ autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red
 The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
 
 ```{r}
-last_log_price <- tail(trainSet$log_price , 1)
-forecasted_log_price <- cumsum(forecast_ets$mean) + last_log_price
+last_log_price <- tail(trainSet$log_price, 1)
 
 # Convert back to actual price
-forecasted_price <- exp(forecasted_log_price)
+forecasted_price <- exp(cumsum(forecast_ets$mean) + last_log_price)
 
 actual_price <- exp(testSet$log_price)
 ```
@@ -281,6 +286,10 @@ autoplot(forecast_ets_ts, series = "Predicted") +
   ylab("Price") +
   xlab("Time") +
   theme_minimal()
+```
+```{r}
+checkresiduals(ets_model)
+checkresiduals(ets_zmodel)
 ```
 
 ## 2.2 ARIMAX Model
@@ -373,19 +382,10 @@ autoplot(actual_arimax_ts, series="Actual Price") +
   autolayer(forecasted_arimax_lower80_ts, series="80% Lower Bound", linetype="dashed") +
   autolayer(forecasted_arimax_upper80_ts, series="80% Upper Bound", linetype="dashed") +
   autolayer(forecasted_arimax_upper95_ts, series="95% Upper Bound", linetype="dashed") +
-  ggtitle("ARIMAX Forecast (Transformed to Original Scale)") +
+  ggtitle("ARIMAX(1,1,1) Forecast (Transformed to Original Scale)") +
   ylab("Actual Price") +
   xlab("Time") +
   theme_minimal()
-```
-
-
-```{r}
-accuracy(arimax_model)
-```
-
-```{r}
-accuracy(forecast_arimax, testSet$log_price)
 ```
 
 ```{r}
@@ -395,68 +395,155 @@ accuracy(forecast_arimax_ts, actual_arimax_ts)
 
 80% lower and upper bound from forecasts create a tighter bounds for the forecasting the actual price as shown in graph. However, since our price data is non-stationary, and there is a sudden increase towards the end, the ARIMAX model, which relies on historical patterns, struggles to capture this trend, leading to poorer performance on the test set.
 
-```{r include=FALSE}
-## 2.3 VAR model (not using this part)
-# Not a very reliable model for our dataset :).
-
-# Prepare the data: price, exchange rate, and average temperature
-# var_data <- trainSet %>% dplyr::select(where(is.numeric))
-# VARselect(var_data, lag.max = 10, type = "const")
-# var_model <- VAR(var_data, p=1, type="const")
-# summary(var_model)
-```
-
-```{r include=FALSE}
-# var_data <- trainSet %>% dplyr::select(where(is.numeric))
-# xreg_matrix <- as.matrix(cbind(var_data$Avg_Temp, var_data$exchange_rate))
-# adf.test(var_data$diff_log_price)
-# armax_model <- auto.arima(var_data$diff_log_price, xreg = xreg_matrix, d=0)
-# summary(armax_model)
-```
-
-```{r include=FALSE}
-# plot(var_data$diff_log_price, type="l")
-```
-
 ## 2.5 GAM Model
 ### 2.5.1 Fit Model
 #### 2.5.1.1 Basic Model
 ```{r}
 # Uses simple smoothing splines for variables
-trainSet$Time_num <- as.numeric(trainSet$Time)
+trainSet$monthFac <- as.factor(format(trainSet$Time, "%m"))
+trainSet$month_num <- as.numeric(trainSet$monthFac)
 
-gam_basic <- gam(diff_log_price ~ s(Time_num) + s(Avg_Temp) + s(exchange_rate), 
+gam_basic <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + s(Avg_Temp) + s(exchange_rate), 
                  data = trainSet, method = "REML")
 ```
 
 ```{r}
 gam.check(gam_basic)
 ```
+```{r}
+summary(gam_basic)
+```
 
 #### 2.5.1.2 Complex Model
 ```{r}
-# Fit GAM model with smooth trend, random effects, and seasonality
 trainSet$dateInt = as.integer(trainSet$Time)
-trainSet$monthFac <- factor(format(trainSet$Time, "%m"))
-gam_complex <- gam(diff_log_price ~ s(dateInt, k = 100) + s(monthFac, bs = "re") + 
-                     sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
-                     sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
-                     s(Avg_Temp) + s(exchange_rate), data = trainSet, 
-                   method = "REML", optimizer = "efs")
+trainSet$Time_num <- as.numeric(trainSet$Time) / 365  # Convert to years
+gam_year <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + 
+                  sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
+                  sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
+                  s(Avg_Temp) +  s(exchange_rate), data = trainSet, method = "REML")
 ```
 
 ```{r}
 summary(gam_basic)
-summary(gam_complex)
+summary(gam_year)
 ```
 
 ```{r}
-plot(gam_complex, pages = 1, shade = TRUE)
+# plot(gam_complex, pages = 1, shade = TRUE)
 ```
 
 ```{r}
-gam.check(gam_complex) 
+# gam.check(gam_complex) 
 ```
+
+### 2.5.2 Forecast and Plot
+```{r}
+testSet$month_num <- as.numeric(format(testSet$Time, "%m"))
+testSet$Time_num <- as.numeric(difftime(testSet$Time, min(trainSet$Time), units="days")) / 365
+testSet$dateInt = as.integer(testSet$Time)
+
+testSet$pred_log <- predict(gam_year, newdata = testSet)
+testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
+testSet$pred_price <- exp(testSet$pred_log_price)
+
+# testSet$pred_price <- exp(log(last_price) + cumsum(testSet$pred_log))
+# testSet$pred_price <- exp(cumsum(testSet$pred_log) + last_log_price)
+```
+
+```{r}
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price, color = "Predicted")) +
+  labs(title = "Actual vs. Predicted Price", 
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+```{r}
+rmse(testSet$month_Price, testSet$pred_price)
+```
+
+
+## 2.6 XGBoost Model
+```{r}
+trainSet$Lag1 <- lag(trainSet$diff_log_price, 1)
+trainSet$Lag12 <- lag(trainSet$diff_log_price, 12)
+testSet$Lag1 <- lag(testSet$diff_log_price, 1)
+testSet$Lag12 <- lag(testSet$diff_log_price, 12)
+
+predictors <- c("Time", "Avg_Temp", "exchange_rate", "Lag1", "Lag12")
+target <- "diff_log_price"
+```
+
+```{r}
+train_data <- trainSet[complete.cases(trainSet[, c(predictors, target)]), ]
+test_data <- testSet[complete.cases(testSet[, predictors]), ]
+
+train_data <- train_data |>
+  mutate(across(all_of(predictors), as.numeric)) 
+test_data <- test_data |>
+  mutate(across(all_of(predictors), as.numeric))
+
+# Convert to DMatrix (XGBoost's optimized format)
+dtrain <- xgb.DMatrix(
+  data = as.matrix(train_data[, predictors]),
+  label = train_data[[target]]
+)
+```
+
+```{r}
+params <- list(
+  objective = "reg:squarederror",  # For regression
+  eta = 0.05,                      # Learning rate (lower for time series)
+  max_depth = 6,                   # Tree depth (avoid overfitting)
+  subsample = 0.8,                 # Random subset of data per tree
+  colsample_bytree = 0.8,          # Random subset of features per tree
+  gamma = 1,                       # Minimum loss reduction for splits
+  min_child_weight = 5             # Prevent overfitting to small groups
+)
+
+set.seed(123)
+xgb_model <- xgb.train(
+  params,
+  data = dtrain,
+  nrounds = 1000,                  # Large number (early stopping will handle)
+  watchlist = list(train = dtrain),
+  early_stopping_rounds = 50,      # Stop if no improvement for 50 rounds
+  print_every_n = 10
+)
+```
+
+```{r}
+dtest <- xgb.DMatrix(as.matrix(test_data[, predictors]))
+test_data$pred_diff_log <- predict(xgb_model, dtest)
+
+# Convert to actual price predictions
+test_data <- test_data %>%
+  mutate(
+    pred_log_price = last_log_price + cumsum(pred_diff_log),  # Only if modeling differences
+    pred_price = exp(pred_log_price)
+  )
+```
+
+```{r}
+ggplot(test_data, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price, color = "Predicted")) +
+  labs(title = "XGBoost: Actual vs. Predicted Price",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+
+```{r}
+# xgb = XGBClassifier(random_state=42)
+# xgb.fit(predictors, target)
+```
+
+
+
 
 
 
