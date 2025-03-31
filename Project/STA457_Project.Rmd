@@ -288,9 +288,14 @@ autoplot(forecast_ets_ts, series = "Predicted") +
 Recall that in Section 1.3.1, we have tested the acf and adf.test, and determined that we would be using the differenced price data. To fit the trainset, we evaluate p and q for ARIMA model.
 
 ```{r}
-adf.test(trainSet$diff_log_price)
+adf.test(trainSet$log_price)
 ```
 
+Next, we check if applying 1st differencing is good enough
+```{r}
+adf.test(diff(trainSet$month_Price))
+```
+P-value is smaller than 0.01 for differenced log price, and we are
 
 ```{r}
 acf2(trainSet$diff_log_price)
@@ -299,14 +304,8 @@ acf2(trainSet$diff_log_price)
 ### 2.2.1 Fit ARIMAX Model
 ```{r}
 xreg_matrix <- cbind(trainSet$Avg_Temp, trainSet$exchange_rate)
-
-# Assign column names to xreg
 colnames(xreg_matrix) <- c("Avg_Temp", "exchange_rate")
-
-# Fit the SARIMA model with the named xreg
-arimax_model <- Arima(trainSet$diff_log_price, order=c(1,0,1), xreg = xreg_matrix)
-
-# Summary of the model
+arimax_model <- Arima(trainSet$log_price, order=c(1,1,1), xreg = xreg_matrix)
 summary(arimax_model)
 ```
 
@@ -318,74 +317,105 @@ AIC(arimax_model)
 checkresiduals(arimax_model)
 ```
 
-Fail to reject $H_0$, hence residuals of this plot do not show significant autocorrelation.
+```{r}
+qqnorm(arimax_model$residuals)
+qqline(arimax_model$residuals, col="red")
+```
 
-### 2.2.2 Forecasting With ARIMAX Model
+Fail to reject $H_0$, hence residuals of this plot do not show significant autocorrelation.
+- QQ-plot shows: ....
+- ACF shows: ...
+- Residuals shows: ...
 
 ```{r}
-# Create future xreg from test set
+arimax_train_ts <- ts(trainSet$log_price, start = start(min(trainSet$Time)), frequency = 12)
+arimax_fitted_ts <- ts(fitted(arimax_model), start = start(min(trainSet$Time)), frequency = 12)
+plot(arimax_train_ts, type='l', col='black', main="ARIMAX: Train Set Log Prices vs Fitted", 
+     ylab="Log Price", xlab="Time")
+lines(arimax_fitted_ts, col='red')
+```
+The ARIMAX model fit the trainSet very accurately.
+
+### 2.2.2 Forecasting With ARIMAX Model
+Next we try to fit this ARIMAX model to testing set.
+```{r}
 forecast_arimax_xreg <- cbind(testSet$Avg_Temp, testSet$exchange_rate)
-
-# Ensure column names match the original xreg
 colnames(forecast_arimax_xreg) <- c("Avg_Temp", "exchange_rate")
+forecast_arimax <- forecast(arimax_model, xreg=forecast_arimax_xreg, h=nrow(testSet))
+```
 
-# Forecast using the ARIMAX model with xreg
-forecast_arimax <- forecast(arimax_model, xreg = forecast_arimax_xreg)
+Then we convert the log prediction back to original price.
 
-# Assuming your model was trained on log_price, use the last log_price from the training set
-last_log_price <- tail(trainSet$log_price, 1)
+```{r}
+start_year <- format(min(testSet$Time), "%Y")
+start_month <- format(min(testSet$Time), "%m")
+start_arimax_test = c(as.numeric(start_year), as.numeric(start_month))
 
-# Convert the forecasted log prices back to actual prices
-forecasted_price_arimax <- exp(cumsum(forecast_arimax$mean) + last_log_price)
+actual_price_arimax <- testSet$month_Price
+forecasted_price_arimax <- exp(forecast_arimax$mean)
+forecasted_arimax_lower95 <- exp(forecast_arimax$lower[,2])
+forecasted_arimax_lower80 <- exp(forecast_arimax$lower[,1])
+forecasted_arimax_upper95 <- exp(forecast_arimax$upper[,2])
+forecasted_arimax_upper80 <- exp(forecast_arimax$upper[,1])
 
-# Get actual prices from the test set
-actual_price_arimax <- exp(cumsum(testSet$diff_log_price) + last_log_price)
+actual_arimax_ts <- ts(actual_price_arimax, start = start_arimax_test, frequency = 12)
+forecast_arimax_ts <- ts(forecasted_price_arimax, start = start_arimax_test, frequency = 12)
+forecasted_arimax_lower80_ts <- ts(forecasted_arimax_lower80, start = start_arimax_test, frequency = 12)
+forecasted_arimax_lower95_ts <- ts(forecasted_arimax_lower95, start = start_arimax_test, frequency = 12)
+forecasted_arimax_upper80_ts <- ts(forecasted_arimax_upper80, start = start_arimax_test, frequency = 12)
+forecasted_arimax_upper95_ts <- ts(forecasted_arimax_upper95, start = start_arimax_test, frequency = 12)
 
-# Create time series objects with the correct start point and frequency
-forecast_arimax_ts <- ts(forecasted_price_arimax, start = start(testSet$Time), frequency = 12)
-actual_arimax_ts <- ts(actual_price_arimax, start = start(testSet$Time), frequency = 12)
 
-# Plot forecast vs actual prices
-autoplot(forecast_arimax_ts, series = "Predicted") + 
-  autolayer(actual_arimax_ts, series = "Actual", color = "blue") +
-  ggtitle("ARIMAX: Forecast vs Actual Prices") +
-  ylab("Price") +
+# Plot with proper transformation
+autoplot(actual_arimax_ts, series="Actual Price") +
+  autolayer(forecast_arimax_ts, series="Forecasted Price") +
+  autolayer(forecasted_arimax_lower95_ts, series="95% Lower Bound", linetype="dashed") +
+  autolayer(forecasted_arimax_lower80_ts, series="80% Lower Bound", linetype="dashed") +
+  autolayer(forecasted_arimax_upper80_ts, series="80% Upper Bound", linetype="dashed") +
+  autolayer(forecasted_arimax_upper95_ts, series="95% Upper Bound", linetype="dashed") +
+  ggtitle("ARIMAX Forecast (Transformed to Original Scale)") +
+  ylab("Actual Price") +
   xlab("Time") +
   theme_minimal()
 ```
 
 
+```{r}
+accuracy(arimax_model)
+```
 
+```{r}
+accuracy(forecast_arimax, testSet$log_price)
+```
+
+```{r}
+accuracy(forecast_arimax$mean, testSet$log_price)
+accuracy(forecast_arimax_ts, actual_arimax_ts)
+```
+
+80% lower and upper bound from forecasts create a tighter bounds for the forecasting the actual price as shown in graph. However, since our price data is non-stationary, and there is a sudden increase towards the end, the ARIMAX model, which relies on historical patterns, struggles to capture this trend, leading to poorer performance on the test set.
 
 ```{r include=FALSE}
 ## 2.3 VAR model (not using this part)
 # Not a very reliable model for our dataset :).
 
 # Prepare the data: price, exchange rate, and average temperature
-var_data <- trainSet %>% dplyr::select(where(is.numeric))
-VARselect(var_data, lag.max = 10, type = "const")
-var_model <- VAR(var_data, p=1, type="const")
-summary(var_model)
+# var_data <- trainSet %>% dplyr::select(where(is.numeric))
+# VARselect(var_data, lag.max = 10, type = "const")
+# var_model <- VAR(var_data, p=1, type="const")
+# summary(var_model)
 ```
 
 ```{r include=FALSE}
-var_data <- trainSet %>% dplyr::select(where(is.numeric))
-xreg_matrix <- as.matrix(cbind(var_data$Avg_Temp, var_data$exchange_rate))
-
-adf.test(var_data$diff_log_price)
-
-armax_model <- auto.arima(var_data$diff_log_price, xreg = xreg_matrix, d=0)
-summary(armax_model)
+# var_data <- trainSet %>% dplyr::select(where(is.numeric))
+# xreg_matrix <- as.matrix(cbind(var_data$Avg_Temp, var_data$exchange_rate))
+# adf.test(var_data$diff_log_price)
+# armax_model <- auto.arima(var_data$diff_log_price, xreg = xreg_matrix, d=0)
+# summary(armax_model)
 ```
 
 ```{r include=FALSE}
-plot(var_data$diff_log_price, type="l")
-```
-
-
-```{r include=FALSE}
-summary(xreg_matrix)
-cor(xreg_matrix)
+# plot(var_data$diff_log_price, type="l")
 ```
 
 ## 2.5 GAM Model
