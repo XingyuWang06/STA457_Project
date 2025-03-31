@@ -261,58 +261,145 @@ checkresiduals(ets_zmodel)
 
 ## 2.5 GAM Model
 ### 2.5.1 Fit Model
-#### 2.5.1.1 Basic Model
 ```{r}
-# Uses simple smoothing splines for variables
-trainSet$monthFac <- as.factor(format(trainSet$Time, "%m"))
-trainSet$month_num <- as.numeric(trainSet$monthFac)
+trainSet$Time = as.Date(trainSet$Time)
+trainSet$monthFac = as.factor(format(trainSet$Time, "%m"))
+# trainSet$month_num = as.numeric(trainSet$monthFac)
+# trainSet$timeNumeric = as.numeric(trainSet$date)
+trainSet$Ndays = days_in_month(trainSet$Time)
+trainSet$logdays = log(trainSet$Ndays)
 
-gam_basic <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + s(Avg_Temp) + s(exchange_rate), 
-                 data = trainSet, method = "REML")
-```
+gam_model <- gam(diff_log_price ~ s(as.numeric(Time), k=12) + s(Avg_Temp) + s(exchange_rate) +
+                   s(monthFac, bs = "re") + sinpi(yday(Time) / 182.625) + 
+                   cospi(yday(Time) / 182.625) + sinpi(yday(Time) / 91.3125) + 
+                   cospi(yday(Time) / 91.3125) + offset(logdays),
+                   data = trainSet, method = "ML", family = gaussian())
 
-```{r}
-gam.check(gam_basic)
-```
-```{r}
-summary(gam_basic)
-```
+gam_model2 <- gam(diff_log_price ~ s(as.numeric(Time), k=100) + s(Avg_Temp) + 
+                   s(log(exchange_rate)) + s(monthFac, bs = "re") + sinpi(yday(Time) / 182.625) + 
+                   cospi(yday(Time) / 182.625) + sinpi(yday(Time) / 91.3125) + 
+                   cospi(yday(Time) / 91.3125) + offset(logdays),
+                   data = trainSet, method = "REML")
 
-#### 2.5.1.2 Complex Model
-```{r}
-trainSet$dateInt = as.integer(trainSet$Time)
-trainSet$Time_num <- as.numeric(trainSet$Time) / 365  # Convert to years
-gam_year <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + 
-                  sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
-                  sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
-                  s(Avg_Temp) +  s(exchange_rate), data = trainSet, method = "REML")
-```
-
-```{r}
-summary(gam_basic)
-summary(gam_year)
+gam_model3 <- gam(diff_log_price ~ s(as.numeric(Time), k=100) + s(Avg_Temp) + 
+                   s(log(exchange_rate)) + s(monthFac, bs = "re") + 
+                    s(yday(Time), bs = "cc", k = 10) + offset(logdays),
+                   data = trainSet, method = "REML")
 ```
 
 ```{r}
-plot(gam_complex, pages = 1, shade = TRUE)
+gam.check(gam_model)
+gam.check(gam_model2)
+gam.check(gam_model3)
 ```
 ```{r}
-gam.check(gam_complex) 
+summary(gam_model)
+summary(gam_model2)
+summary(gam_model3)
 ```
 
 ### 2.5.2 Forecast and Plot
 ```{r}
-testSet$month_num <- as.numeric(format(testSet$Time, "%m"))
-testSet$Time_num <- as.numeric(difftime(testSet$Time, min(trainSet$Time), units="days")) / 365
-testSet$dateInt = as.integer(testSet$Time)
+testSet$Time = as.Date(testSet$Time)
+testSet$monthFac = as.factor(format(testSet$Time, "%m"))
+# trainSet$month_num = as.numeric(trainSet$monthFac)
+# trainSet$timeNumeric = as.numeric(trainSet$date)
+testSet$Ndays = days_in_month(testSet$Time)
+testSet$logdays = log(testSet$Ndays)
+```
 
-testSet$pred_log <- predict(gam_year, newdata = testSet)
+```{r}
+# gam1
+testSet$pred_log <- predict(gam_model, newdata = testSet)
 testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
 testSet$pred_price <- exp(testSet$pred_log_price)
 
-# testSet$pred_price <- exp(log(last_price) + cumsum(testSet$pred_log))
-# testSet$pred_price <- exp(cumsum(testSet$pred_log) + last_log_price)
+# gam2
+testSet$pred_log2 <- predict(gam_model2, newdata = testSet)
+testSet$pred_log_price2 <- last_log_price + cumsum(testSet$pred_log2)
+testSet$pred_price2 <- exp(testSet$pred_log_price2)
+
+# gam3
+testSet$pred_log3 <- predict(gam_model3, newdata = testSet)
+testSet$pred_log_price3 <- last_log_price + cumsum(testSet$pred_log3)
+testSet$pred_price3 <- exp(testSet$pred_log_price3)
+{r}
 ```
+
+```{r}
+# gam1
+preds <- predict(gam_model, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log <- preds$fit
+testSet$pred_log_upper <- preds$fit + 1.96 * preds$se.fit
+testSet$pred_log_lower <- preds$fit - 1.96 * preds$se.fit
+
+testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
+testSet$pred_price <- exp(testSet$pred_log_price)
+
+testSet$pred_log_price_upper <- last_log_price + cumsum(testSet$pred_log_upper)
+testSet$pred_price_upper <- exp(testSet$pred_log_price_upper)
+
+testSet$pred_log_price_lower <- last_log_price + cumsum(testSet$pred_log_lower)
+testSet$pred_price_lower <- exp(testSet$pred_log_price_lower)
+
+# gam2
+preds2 <- predict(gam_model2, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log2 <- preds2$fit
+testSet$pred_log_upper2 <- preds2$fit + 1.96 * preds2$se.fit
+testSet$pred_log_lower2 <- preds2$fit - 1.96 * preds2$se.fit
+
+testSet$pred_log_price2 <- last_log_price + cumsum(testSet$pred_log2)
+testSet$pred_price2 <- exp(testSet$pred_log_price2)
+
+testSet$pred_log_price_upper2 <- last_log_price + cumsum(testSet$pred_log_upper2)
+testSet$pred_price_upper2 <- exp(testSet$pred_log_price_upper2)
+
+testSet$pred_log_price_lower2 <- last_log_price + cumsum(testSet$pred_log_lower2)
+testSet$pred_price_lower2 <- exp(testSet$pred_log_price_lower2)
+
+# gam3
+preds3 <- predict(gam_model3, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log3 <- preds3$fit
+testSet$pred_log_upper3 <- preds3$fit + 1.96 * preds3$se.fit
+testSet$pred_log_lower3 <- preds3$fit - 1.96 * preds3$se.fit
+
+testSet$pred_log_price3 <- last_log_price + cumsum(testSet$pred_log3)
+testSet$pred_price3 <- exp(testSet$pred_log_price3)
+
+testSet$pred_log_price_upper3 <- last_log_price + cumsum(testSet$pred_log_upper3)
+testSet$pred_price_upper3 <- exp(testSet$pred_log_price_upper3)
+
+testSet$pred_log_price_lower3 <- last_log_price + cumsum(testSet$pred_log_lower3)
+testSet$pred_price_lower3 <- exp(testSet$pred_log_price_lower3)
+```
+
+```{r}
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual"), size = 1) +
+  geom_line(aes(y = pred_price, color = "Predicted"), size = 1) +
+  geom_line(aes(y = pred_price_upper), linetype = "dashed", color = "blue") +
+  geom_line(aes(y = pred_price_lower), linetype = "dashed", color = "blue") +
+  labs(title = "Actual vs. Predicted Price with 95% Prediction Interval",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual"), size = 1) +
+  geom_line(aes(y = pred_price2, color = "Predicted"), size = 1) +
+  geom_line(aes(y = pred_price_upper2), linetype = "dashed", color = "blue") +
+  geom_line(aes(y = pred_price_lower2), linetype = "dashed", color = "blue") +
+  labs(title = "Actual vs. Predicted Price with 95% Prediction Interval",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
 
 ```{r}
 ggplot(testSet, aes(x = Time)) +
@@ -323,8 +410,33 @@ ggplot(testSet, aes(x = Time)) +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
 ```
+
 ```{r}
-rmse(testSet$month_Price, testSet$pred_price)
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price2, color = "Predicted")) +
+  labs(title = "Actual vs. Predicted Price", 
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+```{r}
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price3, color = "Predicted")) +
+  labs(title = "Actual vs. Predicted Price", 
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+```{r}
+anova(gam_model, gam_model2, gam_model3)
+```
+
+```{r}
+AIC(gam_model, gam_model2, gam_model3)
 ```
 
 
