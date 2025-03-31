@@ -306,6 +306,9 @@ testSet$monthFac = as.factor(format(testSet$Time, "%m"))
 # trainSet$timeNumeric = as.numeric(trainSet$date)
 testSet$Ndays = days_in_month(testSet$Time)
 testSet$logdays = log(testSet$Ndays)
+
+testSet2 <- testSet
+testSet2$log_exchange_rate <- log(testSet2$exchange_rate)
 ```
 
 ```{r}
@@ -315,18 +318,19 @@ testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
 testSet$pred_price <- exp(testSet$pred_log_price)
 
 # gam2
-testSet$pred_log2 <- predict(gam_model2, newdata = testSet)
-testSet$pred_log_price2 <- last_log_price + cumsum(testSet$pred_log2)
-testSet$pred_price2 <- exp(testSet$pred_log_price2)
+testSet2$pred_log2 <- predict(gam_model2, newdata = testSet2)
+testSet2$pred_log_price2 <- last_log_price + cumsum(testSet2$pred_log2)
+testSet2$pred_price2 <- exp(testSet2$pred_log_price2)
 
 # gam3
-testSet$pred_log3 <- predict(gam_model3, newdata = testSet)
-testSet$pred_log_price3 <- last_log_price + cumsum(testSet$pred_log3)
-testSet$pred_price3 <- exp(testSet$pred_log_price3)
-{r}
+testSet2$pred_log3 <- predict(gam_model3, newdata = testSet2)
+testSet2$pred_log_price3 <- last_log_price + cumsum(testSet2$pred_log3)
+testSet2$pred_price3 <- exp(testSet2$pred_log_price3)
 ```
 
 ```{r}
+## DO NOT KEEP
+
 # gam1
 preds <- predict(gam_model, newdata = testSet, se.fit = TRUE)
 
@@ -377,6 +381,8 @@ testSet$pred_price_lower3 <- exp(testSet$pred_log_price_lower3)
 ```
 
 ```{r}
+## DO NOT KEEP
+
 ggplot(testSet, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual"), size = 1) +
   geom_line(aes(y = pred_price, color = "Predicted"), size = 1) +
@@ -390,19 +396,6 @@ ggplot(testSet, aes(x = Time)) +
 
 ```{r}
 ggplot(testSet, aes(x = Time)) +
-  geom_line(aes(y = month_Price, color = "Actual"), size = 1) +
-  geom_line(aes(y = pred_price2, color = "Predicted"), size = 1) +
-  geom_line(aes(y = pred_price_upper2), linetype = "dashed", color = "blue") +
-  geom_line(aes(y = pred_price_lower2), linetype = "dashed", color = "blue") +
-  labs(title = "Actual vs. Predicted Price with 95% Prediction Interval",
-       x = "Time", y = "Price") +
-  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
-  theme_minimal()
-```
-
-
-```{r}
-ggplot(testSet, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
   geom_line(aes(y = pred_price, color = "Predicted")) +
   labs(title = "Actual vs. Predicted Price", 
@@ -412,7 +405,7 @@ ggplot(testSet, aes(x = Time)) +
 ```
 
 ```{r}
-ggplot(testSet, aes(x = Time)) +
+ggplot(testSet2, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
   geom_line(aes(y = pred_price2, color = "Predicted")) +
   labs(title = "Actual vs. Predicted Price", 
@@ -422,7 +415,7 @@ ggplot(testSet, aes(x = Time)) +
 ```
 
 ```{r}
-ggplot(testSet, aes(x = Time)) +
+ggplot(testSet2, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
   geom_line(aes(y = pred_price3, color = "Predicted")) +
   labs(title = "Actual vs. Predicted Price", 
