@@ -12,7 +12,8 @@ knitr::opts_chunk$set(echo = TRUE)
 ```{r, message=FALSE}
 # install.packages("forecast")
 # install.packages("astsa")
-install.packages("Metrics")
+# install.packages("Metrics")
+install.packages("xgboost")
 
 library(dplyr)
 library(tidyverse)
@@ -24,6 +25,8 @@ library(tseries)
 library(mgcv)
 library(Metrics)
 library(ggplot2)
+library(xgboost)
+library(XGBClassifier)
 ```
 
 
@@ -314,6 +317,87 @@ ggplot(testSet, aes(x = Time)) +
 ```{r}
 rmse(testSet$month_Price, testSet$pred_price)
 ```
+
+
+## 2.6 XGBoost Model
+```{r}
+trainSet$Lag1 <- lag(trainSet$diff_log_price, 1)
+trainSet$Lag12 <- lag(trainSet$diff_log_price, 12)
+testSet$Lag1 <- lag(testSet$diff_log_price, 1)
+testSet$Lag12 <- lag(testSet$diff_log_price, 12)
+
+predictors <- c("Time", "Avg_Temp", "exchange_rate", "Lag1", "Lag12")
+target <- "diff_log_price"
+```
+
+```{r}
+train_data <- trainSet[complete.cases(trainSet[, c(predictors, target)]), ]
+test_data <- testSet[complete.cases(testSet[, predictors]), ]
+
+train_data <- train_data |>
+  mutate(across(all_of(predictors), as.numeric)) 
+test_data <- test_data |>
+  mutate(across(all_of(predictors), as.numeric))
+
+# Convert to DMatrix (XGBoost's optimized format)
+dtrain <- xgb.DMatrix(
+  data = as.matrix(train_data[, predictors]),
+  label = train_data[[target]]
+)
+```
+
+```{r}
+params <- list(
+  objective = "reg:squarederror",  # For regression
+  eta = 0.05,                      # Learning rate (lower for time series)
+  max_depth = 6,                   # Tree depth (avoid overfitting)
+  subsample = 0.8,                 # Random subset of data per tree
+  colsample_bytree = 0.8,          # Random subset of features per tree
+  gamma = 1,                       # Minimum loss reduction for splits
+  min_child_weight = 5             # Prevent overfitting to small groups
+)
+
+set.seed(123)
+xgb_model <- xgb.train(
+  params,
+  data = dtrain,
+  nrounds = 1000,                  # Large number (early stopping will handle)
+  watchlist = list(train = dtrain),
+  early_stopping_rounds = 50,      # Stop if no improvement for 50 rounds
+  print_every_n = 10
+)
+```
+
+```{r}
+dtest <- xgb.DMatrix(as.matrix(test_data[, predictors]))
+test_data$pred_diff_log <- predict(xgb_model, dtest)
+
+# Convert to actual price predictions
+test_data <- test_data %>%
+  mutate(
+    pred_log_price = last_log_price + cumsum(pred_diff_log),  # Only if modeling differences
+    pred_price = exp(pred_log_price)
+  )
+```
+
+```{r}
+ggplot(test_data, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price, color = "Predicted")) +
+  labs(title = "XGBoost: Actual vs. Predicted Price",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+
+```{r}
+xgb = XGBClassifier(random_state=42)
+xgb.fit(predictors, target)
+```
+
+
+
 
 
 
