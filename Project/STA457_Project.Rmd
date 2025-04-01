@@ -429,7 +429,10 @@ anova(gam_model, gam_model2, gam_model3)
 ```
 
 ```{r}
-AIC(gam_model, gam_model2, gam_model3)
+# RMSE
+sqrt(mean((testSet$month_Price - testSet$pred_price)^2))
+sqrt(mean((testSet2$month_Price - testSet2$pred_price2)^2))
+sqrt(mean((testSet2$month_Price - testSet2$pred_price3)^2))
 ```
 
 
@@ -482,4 +485,46 @@ ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")
 sqrt(mean((xgb_walk_df$Actual - xgb_walk_df$Predicted)^2))
 ```
 
+# 3. Prediction
+```{r}
+# Predict 12 months
+future_months <- 12
+
+last_row <- data[nrow(data), ]
+future_predictions <- c()
+future_dates <- c()
+
+for (i in 1:future_months) {
+  future_time <- last_row$Time + (i * 30)
+  future_monthFac <- as.numeric(format(as.Date(future_time, origin = "1970-01-01"), "%m"))
+
+  future_data <- last_row
+  future_data$Time <- future_time
+  future_data$monthFac <- future_monthFac
+
+  x_future <- future_data %>% select(all_of(features))
+  dfuture <- xgb.DMatrix(data = as.matrix(x_future))
+
+  pred_log_future <- predict(xgb_model, dfuture)
+  pred_price_future <- exp(pred_log_future)
+
+  future_predictions <- c(future_predictions, pred_price_future)
+  future_dates <- c(future_dates, as.Date(future_time, origin = "1970-01-01"))
+
+  last_row$log_price <- pred_log_future
+}
+
+future_xgb_df <- tibble(Time = as.Date(future_dates),
+                        Predicted = future_predictions)
+
+combined_df <- bind_rows(xgb_walk_df, future_xgb_df)
+
+ggplot(combined_df, aes(x = Time)) +
+  geom_line(aes(y = Actual, color = "Actual"), na.rm = TRUE) +
+  geom_line(aes(y = Predicted, color = "Predicted"), linetype = "dashed") +
+  labs(title = "XGBoost Walk-Forward Forecast with Future Predictions",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
 
