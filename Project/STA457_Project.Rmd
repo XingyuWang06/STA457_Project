@@ -250,6 +250,9 @@ checkresiduals(ets_model)
 checkresiduals(ets_zmodel)
 ```
 
+```{r}
+sqrt(mean((actual_price - forecasted_price)^2))
+```
 
 
 
