@@ -13,7 +13,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # install.packages("forecast")
 # install.packages("astsa")
 # install.packages("Metrics")
-install.packages("xgboost")
+# install.packages("xgboost")
 
 library(dplyr)
 library(tidyverse)
@@ -157,13 +157,6 @@ ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temper
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
 
-```{r}
-plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
-     main = "Daily Price vs. Avg Temperature")
-```
-```{r}
-pairs(data[, c("month_Price", "Avg_Temp", "exchange_rate")])
-```
 
 ## Combine and Split data
 ```{r}
@@ -173,6 +166,15 @@ data <- data |> mutate(log_price = log(month_Price), diff_log_price =
 data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
 
 data$Time <- as.Date(data$Time)
+```
+
+```{r}
+plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
+     main = "Daily Price vs. Avg Temperature")
+```
+
+```{r}
+pairs(data[, c("month_Price", "Avg_Temp", "exchange_rate")])
 ```
 
 ```{r}
@@ -190,10 +192,6 @@ data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
 # 2. Method
 ## 2.1 ETS Model
 ETS is a purely univariate model and cannot directly handle external regressors.
-```{r}
-plot(ets_model)
-```
-
 
 ### 2.1.1 Fit Model
 ```{r}
@@ -203,7 +201,10 @@ summary(ets_model)
 summary(ets_zmodel)
 ```
 
-
+```{r}
+plot(ets_model)
+plot(ets_zmodel)
+```
 <<<<<<< HEAD
 ### 2.1.2 Forecasting and Plotting
 ```{r}
@@ -442,8 +443,9 @@ dates <- c()
 ```
 
 ```{r}
-data$Time = as.numeric(as.Date(data$Time))
-data$monthFac <- as.numeric(as.factor(data$monthFac))
+data$monthFac <- as.factor(format(data$Time, "%m"))
+data$Time <- as.numeric(as.Date(data$Time))
+data$monthFac <- as.numeric(data$monthFac)
 data$log_exchange_rate <- log(data$exchange_rate)
 features <- c("monthFac", "Time", "Avg_Temp", "log_exchange_rate")
 for (i in 1:ntest) {
@@ -476,6 +478,7 @@ ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")
 ```
 
 ```{r}
+# RMSE
 sqrt(mean((xgb_walk_df$Actual - xgb_walk_df$Predicted)^2))
 ```
 
