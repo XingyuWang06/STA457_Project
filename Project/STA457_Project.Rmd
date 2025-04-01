@@ -26,7 +26,8 @@ library(mgcv)
 library(Metrics)
 library(ggplot2)
 library(xgboost)
-library(XGBClassifier)
+library(Matrix)
+library(caret)
 ```
 
 
@@ -264,8 +265,6 @@ checkresiduals(ets_zmodel)
 ```{r}
 trainSet$Time = as.Date(trainSet$Time)
 trainSet$monthFac = as.factor(format(trainSet$Time, "%m"))
-# trainSet$month_num = as.numeric(trainSet$monthFac)
-# trainSet$timeNumeric = as.numeric(trainSet$date)
 trainSet$Ndays = days_in_month(trainSet$Time)
 trainSet$logdays = log(trainSet$Ndays)
 
@@ -433,88 +432,51 @@ AIC(gam_model, gam_model2, gam_model3)
 ```
 
 
-## 2.6 XGBoost Model
+## 2.6 Walk-Forward Validation with XGBoost Model
+### 2.6.1 Fit and Forecast
 ```{r}
-trainSet$Lag1 <- lag(trainSet$diff_log_price, 1)
-trainSet$Lag12 <- lag(trainSet$diff_log_price, 12)
-testSet$Lag1 <- lag(testSet$diff_log_price, 1)
-testSet$Lag12 <- lag(testSet$diff_log_price, 12)
-
-predictors <- c("Time", "Avg_Temp", "exchange_rate", "Lag1", "Lag12")
-target <- "diff_log_price"
+ntest <- nrow(data) - cutoff
+predictions <- c()
+actuals <- c()
+dates <- c()
 ```
 
 ```{r}
-train_data <- trainSet[complete.cases(trainSet[, c(predictors, target)]), ]
-test_data <- testSet[complete.cases(testSet[, predictors]), ]
+data$Time = as.numeric(as.Date(data$Time))
+data$monthFac <- as.numeric(as.factor(data$monthFac))
+data$log_exchange_rate <- log(data$exchange_rate)
+features <- c("monthFac", "Time", "Avg_Temp", "log_exchange_rate")
+for (i in 1:ntest) {
+  train_data <- data[1:(cutoff + i - 1), ]
+  test_data <- data[(cutoff + i), ]
+  x_train <- train_data %>% select(all_of(features))
+  y_train <- train_data$log_price
+  x_test <- test_data %>% select(all_of(features))
+  dtrain <- xgb.DMatrix(data = as.matrix(x_train), label = y_train)
+  dtest <- xgb.DMatrix(data = as.matrix(x_test))
+  xgb_model <- xgboost(data = dtrain, nrounds = 100, objective = "reg:squarederror", verbose = 0)
+  pred_log <- predict(xgb_model, dtest)
+  pred_price <- exp(pred_log)
+  predictions <- c(predictions, pred_price)
+  actuals <- c(actuals, exp(test_data$log_price))
+  dates <- c(dates, test_data$Time)
+}
 
-train_data <- train_data |>
-  mutate(across(all_of(predictors), as.numeric)) 
-test_data <- test_data |>
-  mutate(across(all_of(predictors), as.numeric))
-
-# Convert to DMatrix (XGBoost's optimized format)
-dtrain <- xgb.DMatrix(
-  data = as.matrix(train_data[, predictors]),
-  label = train_data[[target]]
-)
+xgb_walk_df <- tibble(Time = as.Date(dates),
+                      Actual = actuals,
+                      Predicted = predictions)
 ```
 
 ```{r}
-params <- list(
-  objective = "reg:squarederror",  # For regression
-  eta = 0.05,                      # Learning rate (lower for time series)
-  max_depth = 6,                   # Tree depth (avoid overfitting)
-  subsample = 0.8,                 # Random subset of data per tree
-  colsample_bytree = 0.8,          # Random subset of features per tree
-  gamma = 1,                       # Minimum loss reduction for splits
-  min_child_weight = 5             # Prevent overfitting to small groups
-)
-
-set.seed(123)
-xgb_model <- xgb.train(
-  params,
-  data = dtrain,
-  nrounds = 1000,                  # Large number (early stopping will handle)
-  watchlist = list(train = dtrain),
-  early_stopping_rounds = 50,      # Stop if no improvement for 50 rounds
-  print_every_n = 10
-)
-```
-
-```{r}
-dtest <- xgb.DMatrix(as.matrix(test_data[, predictors]))
-test_data$pred_diff_log <- predict(xgb_model, dtest)
-
-# Convert to actual price predictions
-test_data <- test_data %>%
-  mutate(
-    pred_log_price = last_log_price + cumsum(pred_diff_log),  # Only if modeling differences
-    pred_price = exp(pred_log_price)
-  )
-```
-
-```{r}
-ggplot(test_data, aes(x = Time)) +
-  geom_line(aes(y = month_Price, color = "Actual")) +
-  geom_line(aes(y = pred_price, color = "Predicted")) +
-  labs(title = "XGBoost: Actual vs. Predicted Price",
-       x = "Time", y = "Price") +
-  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")) + 
+  geom_line(aes(y = Predicted, color = "XGBoost Prediction")) +
+  labs(title = "Actual vs. Predicted Price (XGBoost)", x = "Time", y = "Price") + 
+  scale_color_manual(values = c("Actual" = "black", "XGBoost Prediction" = "red")) +
   theme_minimal()
 ```
 
-
 ```{r}
-xgb = XGBClassifier(random_state=42)
-xgb.fit(predictors, target)
+sqrt(mean((xgb_walk_df$Actual - xgb_walk_df$Predicted)^2))
 ```
-
-
-
-
-
-
-
 
 
