@@ -521,13 +521,24 @@ future_xgb_df <- tibble(Time = as.Date(future_dates),
                         Predicted = future_predictions)
 
 combined_df <- bind_rows(xgb_walk_df, future_xgb_df)
+```
 
-ggplot(combined_df, aes(x = Time)) +
+```{r}
+forecast_start <- min(future_xgb_df$Time)
+forecast_end <- max(future_xgb_df$Time)
+
+ggplot(combined_df, aes(x = Time)) + 
+  geom_rect(aes(xmin = forecast_start, xmax = forecast_end, ymin = -Inf, ymax = Inf), 
+            fill = "lightgray", alpha = 0.3) + 
   geom_line(aes(y = Actual, color = "Actual"), na.rm = TRUE) +
   geom_line(aes(y = Predicted, color = "Predicted"), linetype = "dashed") +
-  labs(title = "XGBoost Walk-Forward Forecast with Future Predictions",
+  labs(title = "Future Predictions (12 months) using XGBoost Walk-Forward Forecast",
        x = "Time", y = "Price") +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
+```
+
+```{r}
+summary(combined_df)
 ```
 
