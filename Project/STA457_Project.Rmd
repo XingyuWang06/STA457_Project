@@ -35,6 +35,7 @@ library(caret)
 ```{r}
 price = read.csv("./Daily Prices_ICCO.csv")
 weather = read.csv("./Ghana_data.csv")
+USD_GHS_Historical_Data <- read_csv("~/sta457/STA457_Project/Project/USD_GHS Historical Data.csv")
 ```
 
 ## 1.1 Clean Data
