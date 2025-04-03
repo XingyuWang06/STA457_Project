@@ -274,8 +274,10 @@ data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1),
 
 h <- nrow(testSet)
 forecast_ets <- forecast(ets_model, h = h)
+forecast_zets <- forecast(ets_zmodel, h = h)
 
 autoplot(forecast_ets) + autolayer(data_test_ts, series = "Actual", color = "red")
+autoplot(forecast_zets) + autolayer(data_test_ts, series = "Actual", color = "red")
 ```
 The red line is the observed actual values. The forecasted values are the central blue line within the blue shaded prediction intervals.
 
@@ -284,6 +286,7 @@ last_log_price <- tail(trainSet$log_price, 1)
 
 # Convert back to actual price
 forecasted_price <- exp(cumsum(forecast_ets$mean) + last_log_price)
+forecasted_zprice <- exp(cumsum(forecast_zets$mean) + last_log_price)
 
 actual_price <- exp(testSet$log_price)
 ```
@@ -293,12 +296,23 @@ data_test_ts <- ts(testSet$diff_log_price, start = end(data_train_ts) + c(0,1),
                    frequency = 12)
 
 forecast_ets_ts <- ts(forecasted_price, start = start(data_test_ts), frequency = 12)
+forecast_zets_ts <- ts(forecasted_zprice, start = start(data_test_ts), frequency = 12)
 actual_ets_ts <- ts(actual_price, start = start(data_test_ts), frequency = 12)
 ```
 
 ```{r}
-# Plot using actual price
+# ANA
 autoplot(forecast_ets_ts, series = "Predicted") + 
+  autolayer(actual_ets_ts, series = "Actual", color = "blue") +
+  ggtitle("Forecast vs Actual Prices") +
+  ylab("Price") +
+  xlab("Time") +
+  theme_minimal()
+```
+
+```{r}
+# ANN
+autoplot(forecast_zets_ts, series = "Predicted") + 
   autolayer(actual_ets_ts, series = "Actual", color = "blue") +
   ggtitle("Forecast vs Actual Prices") +
   ylab("Price") +
@@ -312,7 +326,17 @@ checkresiduals(ets_zmodel)
 ```
 
 ```{r}
+# RMSE
 sqrt(mean((actual_price - forecasted_price)^2))
+sqrt(mean((actual_price - forecasted_zprice)^2))
+
+#MAE
+mean(abs(actual_ets_ts - forecast_ets_ts))
+mean(abs(actual_ets_ts - forecast_zets_ts))
+
+# MAPE
+mean(abs((actual_ets_ts - forecast_ets_ts) / actual_ets_ts)) * 100
+mean(abs((actual_ets_ts - forecast_zets_ts) / actual_ets_ts)) * 100
 ```
 
 ## 2.2 ARIMAX Model
@@ -729,6 +753,16 @@ anova(gam_model, gam_model2, gam_model3)
 sqrt(mean((testSet$month_Price - testSet$pred_price)^2))
 sqrt(mean((testSet2$month_Price - testSet2$pred_price2)^2))
 sqrt(mean((testSet2$month_Price - testSet2$pred_price3)^2))
+
+# MAE
+mean(abs(testSet$month_Price - testSet$pred_price))
+mean(abs(testSet2$month_Price - testSet2$pred_price2))
+mean(abs(testSet2$month_Price - testSet2$pred_price3))
+
+# MAPE
+mean(abs((testSet$month_Price - testSet$pred_price) / testSet$month_Price)) * 100
+mean(abs((testSet2$month_Price - testSet2$pred_price2) / testSet2$month_Price)) * 100
+mean(abs((testSet2$month_Price - testSet2$pred_price3) / testSet2$month_Price)) * 100
 ```
 
 
@@ -779,6 +813,12 @@ ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")
 ```{r}
 # RMSE
 sqrt(mean((xgb_walk_df$Actual - xgb_walk_df$Predicted)^2))
+
+# MAE
+mean(abs(xgb_walk_df$Actual - xgb_walk_df$Predicted))
+
+# MAPE
+mean(abs((xgb_walk_df$Actual - xgb_walk_df$Predicted) / xgb_walk_df$Actual)) * 100
 ```
 
 # 3. Prediction
