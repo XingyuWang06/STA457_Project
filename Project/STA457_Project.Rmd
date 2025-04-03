@@ -1,20 +1,15 @@
 ---
 title: "STA457 Project"
-author: "Xing Yu Wang"
+author: "Xingyu Wang, Xinyue Tao"
 date: "2025-03-29"
 output: pdf_document
 ---
 
 ```{r setup, include=FALSE}
-knitr::opts_chunk$set(echo = TRUE)
+knitr::opts_chunk$set(echo = TRUE, fig.align = "center", out.width = "75%")
 ```
 
 ```{r, message=FALSE}
-# install.packages("forecast")
-# install.packages("astsa")
-# install.packages("Metrics")
-# install.packages("xgboost")
-
 library(dplyr)
 library(tidyverse)
 library(readr)
@@ -28,20 +23,23 @@ library(ggplot2)
 library(xgboost)
 library(Matrix)
 library(caret)
+library(rugarch)
+library(tibble)
+library(xts)
 ```
-
 
 # 1. EDA
 ```{r}
 price = read.csv("./Daily Prices_ICCO.csv")
 weather = read.csv("./Ghana_data.csv")
-USD_GHS_Historical_Data <- read_csv("~/sta457/STA457_Project/Project/USD_GHS Historical Data.csv")
+# USD_GHS_Historical_Data <- read_csv("~/sta457/STA457_Project/Project/USD_GHS Historical Data.csv")
+USD_GHS_Historical_Data = read.csv("./USD_GHS Historical Data.csv")
 ```
 
 ## 1.1 Clean Data
 ```{r}
-weather <- weather |> select(DATE, TAVG)
-exchangerate <- USD_GHS_Historical_Data |> select(Date, Price)
+weather <- weather |> dplyr::select(DATE, TAVG)
+exchangerate <- USD_GHS_Historical_Data |> dplyr::select(Date, Price)
 ```
 
 ```{r}
@@ -93,20 +91,27 @@ ndiffs(price_ts)
 
 ```{r}
 price_month$price_log <- log(price_month$month_Price)
-diff_log_price = diff(price_month$price_log)
+adf.test(price_month$price_log)
 ```
 
 ```{r}
+acf2(price_month$price_log, 50)
+```
+
+Hence, we want to difference the price data.
+
+```{r}
+diff_log_price = diff(price_month$price_log)
 ts.plot(diff_log_price, main = "Log Differenced Price Data", ylab = "Log Differenced Price")
 ```
+
 ```{r}
 adf.test(diff_log_price)
 ```
+
 ```{r}
 acf2(diff_log_price, 50)
 ```
-
-
 
 ### 1.3.2 ghana Dataset
 ```{r}
@@ -128,7 +133,7 @@ weather_ts <- ts(weather_month$Avg_Temp, start = c(1994, 11), end = c(2024, 11),
 ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
 ```
 
-## exchange Data
+### 1.3.3 exchange Data
 ```{r}
 exchangerate$Date <- as.Date(exchangerate$Date)
 exchangerate$exchange_rate <- as.numeric(gsub("", "", exchangerate$exchange_rate))
@@ -158,13 +163,36 @@ ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temper
 ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
 ```
 
+## 1.4 Time series plots for data
+```{r}
+ggtsdisplay(price_ts, main="Time series plot for Monthly World Cocoa Price")
+```
 
-## Combine and Split data
+```{r}
+ggtsdisplay(weather_ts, main="Time series plot for Monthly Average Temperature")
+```
+
+```{r}
+ggtsdisplay(rate_ts, main="Time series plot for Monthly Average Exchange Rate(USD/GHS)")
+```
+
+```{r}
+par(mfrow=c(3,1), mar = c(3, 4, 2, 2))
+# price
+plot(price_ts, main="Monthly Price Time Series", ylab="Price", xlab="Time")
+#temperature
+ts.plot(weather_ts, main="Monthly Average Temperature Time Series", ylab="Temperature", xlab="Time")
+# exchange rate
+ts.plot(rate_ts, main="Monthly Average Exchange Rate Time Series", ylab="Exchange Rate (USD/GHS)", xlab="Time")
+```
+
+
+## 1.5 Combine Datasets
 ```{r}
 data <- price_month |> left_join(weather_month, by = "Time") |> left_join(rate_month, by = "Time")
 data <- data |> mutate(log_price = log(month_Price), diff_log_price = 
                          c(NA, diff(price_month$price_log))) |> drop_na()
-data <- data |> select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
+data <- data |> dplyr::select(Time, Avg_Temp, exchange_rate, diff_log_price, log_price, month_Price)
 
 data$Time <- as.Date(data$Time)
 ```
@@ -172,12 +200,45 @@ data$Time <- as.Date(data$Time)
 ```{r}
 plot(data$Avg_Temp, data$month_Price, xlab = "Monthly Price", ylab = "Average Temperature", 
      main = "Daily Price vs. Avg Temperature")
-```
-
-```{r}
 pairs(data[, c("month_Price", "Avg_Temp", "exchange_rate")])
 ```
 
+
+## 1.6 Stationary Check
+```{r}
+adf.test(data$Avg_Temp)
+adf.test(data$exchange_rate)
+adf.test(log(data$exchange_rate))
+adf.test(diff(log(data$exchange_rate)))
+```
+
+Since monthly average temperature is already stationary, we would do take the differenced and log-transformed exchange rate as our exogenous factors.
+
+```{r}
+acf2(data$exchange_rate)
+acf2(log(data$exchange_rate))
+acf2(diff(log(data$exchange_rate)))
+```
+
+ACF shows similar trend, where only differenced log-transformed exchange rate is stationary. Hence, this differenced and log-transformed exchange rate will be used as one of the external(exogenous) regressors in ARIMAX and GARCHX.
+
+```{r}
+adf.test(data$month_Price)
+adf.test(data$log_price)
+adf.test(data$diff_log_price)
+```
+
+Since only the diff_log_price is stationary, we choose differenced monthly log price when fitting the model.
+
+```{r}
+diff_price_ts <- ts(data$diff_log_price, frequency = 12)
+autoplot(decompose(diff_price_ts, type="additive")) +
+  ggtitle("Decomposition of Differenced Log Price Time Series") +
+  theme_minimal()
+```
+
+
+## 1.7 Split data
 ```{r}
 data <- data[order(data$Time), ]
 cutoff <- floor(0.7 * nrow(data))
@@ -185,14 +246,12 @@ trainSet <- data[1:cutoff, ]
 testSet <- data[(cutoff+1):nrow(data), ]
 ```
 
-```{r}
-data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
-```
-
-
 # 2. Method
 ## 2.1 ETS Model
 ETS is a purely univariate model and cannot directly handle external regressors.
+```{r}
+data_train_ts <- ts(trainSet$diff_log_price, frequency = 12)
+```
 
 ### 2.1.1 Fit Model
 ```{r}
@@ -206,7 +265,7 @@ summary(ets_zmodel)
 plot(ets_model)
 plot(ets_zmodel)
 ```
-<<<<<<< HEAD
+
 ### 2.1.2 Forecasting and Plotting
 ```{r}
 # Plot using log differenced price
@@ -246,6 +305,7 @@ autoplot(forecast_ets_ts, series = "Predicted") +
   xlab("Time") +
   theme_minimal()
 ```
+
 ```{r}
 checkresiduals(ets_model)
 checkresiduals(ets_zmodel)
@@ -255,15 +315,313 @@ checkresiduals(ets_zmodel)
 sqrt(mean((actual_price - forecasted_price)^2))
 ```
 
+## 2.2 ARIMAX Model
+
+Recall that in Section 1.3.1, we have tested the acf and adf.test, and determined that we would be using the differenced price data before we fit the model.
+
+```{r}
+adf.test(diff(trainSet$month_Price))
+```
+
+```{r}
+adf.test(trainSet$log_price)
+```
+
+```{r}
+acf2(trainSet$diff_log_price)
+```
+
+```{r}
+adf.test(data$Avg_Temp)
+```
 
 
-=======
-## 2.2 ARIMA Model
->>>>>>> c2884286efa75e995485ea3383a0f60ac38f463b
+```{r}
+adf.test(diff(log(data$exchange_rate)))
+```
 
-## 2.3 SARIMA Model
 
-## 2.4 ARMAX Model
+### 2.2.1 Fit ARIMAX Model
+
+```{r}
+dl.rate.train <- c(0, diff(log(trainSet$exchange_rate)))
+xreg_matrix <- cbind(trainSet$Avg_Temp, dl.rate.train)
+colnames(xreg_matrix) <- c("Avg_Temp", "dl_exchange_rate")
+
+p <- 0:10
+q <- 0:10
+aic.arimax <- matrix(0, length(p), length(q)) 
+for (i in 1:length(p)) {
+  for (j in 1:length(q)) {
+      modij = Arima(trainSet$diff_log_price, order = c(p[i], 0, q[j]), 
+                    method = "ML", xreg=xreg_matrix)
+      aic.arimax[i, j] = AIC(modij)
+  }
+}
+
+aic.arimax.min_index <- which(aic.arimax == min(aic.arimax), arr.ind = TRUE)
+ariamx.p <- p[aic.arimax.min_index[1]]
+ariamx.q <- q[aic.arimax.min_index[2]]
+sprintf("Selected order for ARMA: p = %d, q = %d", ariamx.p, ariamx.q)
+```
+
+```{r}
+model.arimax <- Arima(trainSet$diff_log_price, order=c(ariamx.p,0,ariamx.q), xreg = xreg_matrix)
+summary(model.arimax)
+```
+
+```{r}
+checkresiduals(model.arimax)
+```
+
+```{r}
+qqnorm(model.arimax$residuals)
+qqline(model.arimax$residuals, col="red")
+```
+```{r}
+adf.test(model.arimax$residuals)
+```
+
+- ADF Test on ARIMAX Model Residuals: Failed to reject H_0, indicating that the residuals do not exhibit significant autocorrelation.
+- Histogram and QQ-Plot of Residuals: Residuals align well with the 45-degree line, suggesting normality.
+- ACF of Residuals: Appears random, with all lags within the range of -0.15 to 0.1, indicating no strong autocorrelations.
+- Standardized Residuals Plot: No discernible trend observed, further supporting the model’s adequacy.
+- Ljung-Box Test (Residuals from ARIMA(2,0,3) model):
+  - Q^* = 7.1814, df = 5, p-value = 0.2075
+  - Model degrees of freedom: 5, Total lags used: 10
+Conclusion: The ARIMAX model effectively captures the trend of the training dataset.
+
+### 2.2.2 Forecasting With ARIMAX Model
+Next we try to fit this ARIMAX model to forecast on testing set.
+
+```{r}
+dl.rate.test <- c(0, diff(log(testSet$exchange_rate)))
+forecast.arimax.xreg <- cbind(testSet$Avg_Temp, dl.rate.test)
+colnames(forecast.arimax.xreg) <- c("Avg_Temp", "dl_exchange_rate")
+forecast.arimax <- forecast(model.arimax, xreg=forecast.arimax.xreg, 
+                            h=nrow(testSet))
+
+last_log_price <- tail(trainSet$log_price, 1)
+# Convert back to actual price
+forecast.arimax.final <- exp(cumsum(forecast.arimax$mean) + last_log_price)
+```
+
+```{r}
+model.arimax.fitted <- as.numeric(model.arimax$fitted)
+model.arimax.fitted.converted <- exp(log(trainSet$month_Price[1]) 
+                                     + cumsum(model.arimax.fitted))
+rmse(trainSet$month_Price, model.arimax.fitted.converted)
+mae(trainSet$month_Price, model.arimax.fitted.converted)
+mape(trainSet$month_Price, model.arimax.fitted.converted)
+```
+
+```{r}
+rmse(testSet$month_Price, forecast.arimax.final)
+mae(testSet$month_Price, forecast.arimax.final)
+mape(testSet$month_Price, forecast.arimax.final)
+```
+
+```{r}
+forecast.arimax.df <- tibble(
+  Time = testSet$Time,
+  Price = forecast.arimax.final
+)
+test.arimax.df <- tibble(
+  Time = testSet$Time,
+  Price = testSet$month_Price
+)
+```
+
+```{r}
+ggplot() +
+  geom_line(data = test.arimax.df, aes(x = Time, y = Price, color = "Actual")) +
+  geom_line(data = forecast.arimax.df, aes(x = Time, y = Price, color = "Forecast")) +
+  labs(
+    title = "ARIMAX(2,0,3) Forecast vs Actual Monthly Prices", 
+    y = "Price", 
+    x = "Time",
+    color = "Legend"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c(
+    "Actual" = "black",
+    "Forecast" = "red"))
+```
+## 2.3 ARMAX-GARCH Model
+### 2.3.1 ARMAX-GARCH Parameters
+```{r}
+# xreg_matrix is the same as arimax
+p = 0:3
+q = 0:3
+## select ARMA order
+aic.armax.garch1 <- matrix(0, length(p), length(q)) 
+for (i in 1:length(p)) {
+  for (j in 1:length(q)) {
+      modij = Arima(trainSet$diff_log_price, order = c(p[i], 0, q[j]), 
+                    method = "ML", xreg=xreg_matrix)
+      aic.armax.garch1[i, j] = AIC(modij)
+  }
+}
+aic.armax.min_index <- which(aic.armax.garch1 == min(aic.armax.garch1), arr.ind = TRUE)
+aramx.garch.p <- p[aic.armax.min_index[1]]
+aramx.garch.q <- q[aic.armax.min_index[2]]
+sprintf("Selected order for ARMA: p = %d, q = %d", aramx.garch.p, aramx.garch.q)
+```
+
+This is the same as what we have for ARIMAX. Then we use the similar method, where we fix the armax order, and systematically search for the combination of orders for garch configuration with smallest AIC.
+
+```{r}
+m = 1:3
+n = 1:3
+# dl.rate.train <- c(0, diff(log(trainSet$exchange_rate)))
+# xreg_matrix <- cbind(trainSet$Avg_Temp, dl.rate.train)
+# colnames(xreg_matrix) <- c("Avg_Temp", "dl_exchange_rate")
+## select GARCH order
+aic.armax.garch2 <- matrix(0, length(m), length(n)) 
+for (i in 1:length(m)) {
+  for (j in 1:length(n)) {
+      spec = ugarchspec(variance.model=list(model="sGARCH", 
+                                            garchOrder=c(m[i],n[j])),
+                mean.model=list(armaOrder=c(aramx.garch.p, aramx.garch.q), 
+                                include.mean=T, 
+                                external.regressors = xreg_matrix),
+                distribution.model="std")   
+      modij = ugarchfit(spec=spec, data = trainSet$diff_log_price,
+                        trace = FALSE)
+      aic.armax.garch2[i, j] = infocriteria(modij)[1]
+  }
+}
+
+
+aic.garch.min_index <- which(aic.armax.garch2 == min(aic.armax.garch2), arr.ind = TRUE)
+aramx.garch.m <- m[aic.garch.min_index[1]]
+aramx.garch.n <- n[aic.garch.min_index[2]]
+sprintf("Selected order for GARCH: m = %d, n = %d", aramx.garch.m, aramx.garch.n)
+```
+
+```{r}
+armax.garch.spec.train <- ugarchspec(variance.model=list(model="sGARCH", 
+                                            garchOrder=c(aramx.garch.m,aramx.garch.n)),
+                mean.model=list(armaOrder=c(aramx.garch.p, aramx.garch.q), 
+                                include.mean=T, 
+                                external.regressors = xreg_matrix),
+                distribution.model="std")   
+model.armax.garch <- ugarchfit(armax.garch.spec.train, 
+                               data = trainSet$diff_log_price,
+                               trace = FALSE)
+model.armax.garch
+```
+
+```{r}
+model.armax.garch@fit$coef
+```
+
+```{r}
+garch_time_index <- as.POSIXct(trainSet$Time)
+residuals_armax_garch_xts <- xts(residuals(model.armax.garch), 
+                                 order.by = garch_time_index)
+std_resid_armax_garch_xts <- xts(model.armax.garch@fit$z, 
+                                 order.by = garch_time_index)
+
+# Residual Analysis
+par(mfrow = c(2, 2))
+
+# Residual plots
+plot(residuals_armax_garch_xts, main = "Residuals")
+plot(std_resid_armax_garch_xts, main = "Standardized Residuals")
+
+# ACF plots
+acf(na.omit(as.numeric(residuals(model.armax.garch))), main = "ACF of Residuals")
+acf(na.omit(as.numeric(residuals(model.armax.garch)^2)), main = "ACF of Squared Residuals")
+```
+
+```{r}
+armax.garch.actual.values <- trainSet$diff_log_price
+armax.garch.fitted.values <- as.numeric(fitted(model.armax.garch))
+
+armax.garch.fit.df <- tibble(
+  Time = trainSet$Time,
+  Price = armax.garch.fitted.values
+)
+armax.garch.train.df <- tibble(
+  Time = trainSet$Time,
+  Price = trainSet$diff_log_price
+)
+```
+
+```{r}
+ggplot() +
+  geom_line(data = armax.garch.fit.df, aes(x = Time, y = Price, color = "Fitted")) +
+  geom_line(data = armax.garch.train.df, aes(x = Time, y = Price, color = "Actual")) +
+  labs(
+    title = "sGARCH(1,1) with ARFIMA(2,0,3) Model: Fitted vs Actual Prices", 
+    y = "Price", 
+    x = "Time",
+    color = "Legend"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual" = "grey", "Fitted" = "red"))
+```
+
+### 2.3.2 ARMAX-GARCH Forecast
+```{r}
+# multi-step forecast
+ngarchfore = length(testSet$diff_log_price)
+xreg_test_matrix <- cbind(testSet$Avg_Temp, diff(log(testSet$exchange_rate)))
+colnames(xreg_test_matrix) <- c("Avg_Temp", "dl_exchange_rate")
+
+fore.garch.dl = ugarchforecast(model.armax.garch,
+                               n.ahead = ngarchfore,
+                              external.forecasts = list(mreg=xreg_test_matrix))
+fore.garch.dl.data <- as.numeric(fore.garch.dl@forecast$seriesFor)
+last_log_price <- tail(trainSet$log_price, 1)
+forecast.armax.garch.multi <- tail(trainSet$month_Price, 1)*exp(cumsum(fore.garch.dl.data))
+```
+
+```{r}
+library(tibble)
+forecast.garch.multi.df <- tibble(
+  Time = testSet$Time,
+  Price = forecast.armax.garch.multi
+)
+test.garch.df <- tibble(
+  Time = testSet$Time,
+  Price = testSet$month_Price
+)
+```
+
+```{r}
+library(ggplot2)
+ggplot() +
+  geom_line(data = test.garch.df, aes(x = Time, y = Price, color = "Actual")) +
+  geom_line(data = forecast.garch.multi.df, aes(x = Time, y = Price, color = "Forecast")) +
+  labs(
+    title = "sGARCH(1,1) with ARFIMA(2,0,3) Multi-steps Forecast vs Actual Monthly Prices", 
+    y = "Price", 
+    x = "Time",
+    color = "Legend"
+  ) +
+  theme_minimal() +
+  scale_color_manual(values = c("Actual" = "black", "Forecast" = "red"))
+```
+
+RMSE below shows the forecast ability of the final model with one-step forecast
+
+```{r}
+model.armax.garch.fitted <- as.numeric(fitted(model.armax.garch))
+model.armax.garch.fitted.converted <- exp(log(trainSet$month_Price[1]) 
+                                     + cumsum(model.armax.garch.fitted))
+rmse(trainSet$month_Price, model.armax.garch.fitted.converted)
+mae(trainSet$month_Price, model.armax.garch.fitted.converted)
+mape(trainSet$month_Price, model.armax.garch.fitted.converted)
+```
+
+```{r}
+rmse(testSet$month_Price, forecast.armax.garch.multi[1:length(testSet$Time)])
+mae(testSet$month_Price, forecast.armax.garch.multi[1:length(testSet$Time)])
+mape(testSet$month_Price, forecast.armax.garch.multi[1:length(testSet$Time)])
+```
+
 
 ## 2.5 GAM Model
 ### 2.5.1 Fit Model
