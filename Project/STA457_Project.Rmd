@@ -21,7 +21,8 @@ library(mgcv)
 library(Metrics)
 library(ggplot2)
 library(xgboost)
-# library(XGBClassifier)
+library(Matrix)
+library(caret)
 library(rugarch)
 library(tibble)
 library(xts)
@@ -31,6 +32,7 @@ library(xts)
 ```{r}
 price = read.csv("./Daily Prices_ICCO.csv")
 weather = read.csv("./Ghana_data.csv")
+# USD_GHS_Historical_Data <- read_csv("~/sta457/STA457_Project/Project/USD_GHS Historical Data.csv")
 USD_GHS_Historical_Data = read.csv("./USD_GHS Historical Data.csv")
 ```
 
@@ -261,6 +263,7 @@ summary(ets_zmodel)
 
 ```{r}
 plot(ets_model)
+plot(ets_zmodel)
 ```
 
 ### 2.1.2 Forecasting and Plotting
@@ -302,24 +305,27 @@ autoplot(forecast_ets_ts, series = "Predicted") +
   xlab("Time") +
   theme_minimal()
 ```
+
 ```{r}
 checkresiduals(ets_model)
 checkresiduals(ets_zmodel)
 ```
 
+```{r}
+sqrt(mean((actual_price - forecasted_price)^2))
+```
+
 ## 2.2 ARIMAX Model
 
-Recall that in Section 1.3.1, we have tested the acf and adf.test, and determined that we would be using the differenced price data. To fit the trainset, we evaluate p and q for ARIMA model.
+Recall that in Section 1.3.1, we have tested the acf and adf.test, and determined that we would be using the differenced price data before we fit the model.
+
+```{r}
+adf.test(diff(trainSet$month_Price))
+```
 
 ```{r}
 adf.test(trainSet$log_price)
 ```
-
-Next, we check if applying 1st differencing is good enough
-```{r}
-adf.test(diff(trainSet$month_Price))
-```
-P-value is smaller than 0.01 for differenced log price, and we are
 
 ```{r}
 acf2(trainSet$diff_log_price)
@@ -620,58 +626,135 @@ mape(testSet$month_Price, forecast.armax.garch.multi[1:length(testSet$Time)])
 
 ## 2.5 GAM Model
 ### 2.5.1 Fit Model
-#### 2.5.1.1 Basic Model
 ```{r}
-# Uses simple smoothing splines for variables
-trainSet$monthFac <- as.factor(format(trainSet$Time, "%m"))
-trainSet$month_num <- as.numeric(trainSet$monthFac)
+trainSet$Time = as.Date(trainSet$Time)
+trainSet$monthFac = as.factor(format(trainSet$Time, "%m"))
+trainSet$Ndays = days_in_month(trainSet$Time)
+trainSet$logdays = log(trainSet$Ndays)
 
-gam_basic <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + s(Avg_Temp) + s(exchange_rate), 
-                 data = trainSet, method = "REML")
+gam_model <- gam(diff_log_price ~ s(as.numeric(Time), k=12) + s(Avg_Temp) + s(exchange_rate) +
+                   s(monthFac, bs = "re") + sinpi(yday(Time) / 182.625) + 
+                   cospi(yday(Time) / 182.625) + sinpi(yday(Time) / 91.3125) + 
+                   cospi(yday(Time) / 91.3125) + offset(logdays),
+                   data = trainSet, method = "ML", family = gaussian())
+
+gam_model2 <- gam(diff_log_price ~ s(as.numeric(Time), k=100) + s(Avg_Temp) + 
+                   s(log(exchange_rate)) + s(monthFac, bs = "re") + sinpi(yday(Time) / 182.625) + 
+                   cospi(yday(Time) / 182.625) + sinpi(yday(Time) / 91.3125) + 
+                   cospi(yday(Time) / 91.3125) + offset(logdays),
+                   data = trainSet, method = "REML")
+
+gam_model3 <- gam(diff_log_price ~ s(as.numeric(Time), k=100) + s(Avg_Temp) + 
+                   s(log(exchange_rate)) + s(monthFac, bs = "re") + 
+                    s(yday(Time), bs = "cc", k = 10) + offset(logdays),
+                   data = trainSet, method = "REML")
 ```
 
 ```{r}
-gam.check(gam_basic)
+gam.check(gam_model)
+gam.check(gam_model2)
+gam.check(gam_model3)
 ```
 ```{r}
-summary(gam_basic)
-```
-
-#### 2.5.1.2 Complex Model
-```{r}
-trainSet$dateInt = as.integer(trainSet$Time)
-trainSet$Time_num <- as.numeric(trainSet$Time) / 365  # Convert to years
-gam_year <- gam(diff_log_price ~ s(month_num, bs="cc", k=12) + 
-                  sinpi(dateInt / 182.625) + cospi(dateInt / 182.625) + 
-                  sinpi(dateInt / 91.3125) + cospi(dateInt / 91.3125) + 
-                  s(Avg_Temp) +  s(exchange_rate), data = trainSet, method = "REML")
-```
-
-```{r}
-summary(gam_basic)
-summary(gam_year)
-```
-
-```{r}
-# plot(gam_complex, pages = 1, shade = TRUE)
-```
-
-```{r}
-# gam.check(gam_complex) 
+summary(gam_model)
+summary(gam_model2)
+summary(gam_model3)
 ```
 
 ### 2.5.2 Forecast and Plot
 ```{r}
-testSet$month_num <- as.numeric(format(testSet$Time, "%m"))
-testSet$Time_num <- as.numeric(difftime(testSet$Time, min(trainSet$Time), units="days")) / 365
-testSet$dateInt = as.integer(testSet$Time)
+testSet$Time = as.Date(testSet$Time)
+testSet$monthFac = as.factor(format(testSet$Time, "%m"))
+# trainSet$month_num = as.numeric(trainSet$monthFac)
+# trainSet$timeNumeric = as.numeric(trainSet$date)
+testSet$Ndays = days_in_month(testSet$Time)
+testSet$logdays = log(testSet$Ndays)
 
-testSet$pred_log <- predict(gam_year, newdata = testSet)
+testSet2 <- testSet
+testSet2$log_exchange_rate <- log(testSet2$exchange_rate)
+```
+
+```{r}
+# gam1
+testSet$pred_log <- predict(gam_model, newdata = testSet)
 testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
 testSet$pred_price <- exp(testSet$pred_log_price)
 
-# testSet$pred_price <- exp(log(last_price) + cumsum(testSet$pred_log))
-# testSet$pred_price <- exp(cumsum(testSet$pred_log) + last_log_price)
+# gam2
+testSet2$pred_log2 <- predict(gam_model2, newdata = testSet2)
+testSet2$pred_log_price2 <- last_log_price + cumsum(testSet2$pred_log2)
+testSet2$pred_price2 <- exp(testSet2$pred_log_price2)
+
+# gam3
+testSet2$pred_log3 <- predict(gam_model3, newdata = testSet2)
+testSet2$pred_log_price3 <- last_log_price + cumsum(testSet2$pred_log3)
+testSet2$pred_price3 <- exp(testSet2$pred_log_price3)
+```
+
+```{r}
+## DO NOT KEEP
+
+# gam1
+preds <- predict(gam_model, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log <- preds$fit
+testSet$pred_log_upper <- preds$fit + 1.96 * preds$se.fit
+testSet$pred_log_lower <- preds$fit - 1.96 * preds$se.fit
+
+testSet$pred_log_price <- last_log_price + cumsum(testSet$pred_log)
+testSet$pred_price <- exp(testSet$pred_log_price)
+
+testSet$pred_log_price_upper <- last_log_price + cumsum(testSet$pred_log_upper)
+testSet$pred_price_upper <- exp(testSet$pred_log_price_upper)
+
+testSet$pred_log_price_lower <- last_log_price + cumsum(testSet$pred_log_lower)
+testSet$pred_price_lower <- exp(testSet$pred_log_price_lower)
+
+# gam2
+preds2 <- predict(gam_model2, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log2 <- preds2$fit
+testSet$pred_log_upper2 <- preds2$fit + 1.96 * preds2$se.fit
+testSet$pred_log_lower2 <- preds2$fit - 1.96 * preds2$se.fit
+
+testSet$pred_log_price2 <- last_log_price + cumsum(testSet$pred_log2)
+testSet$pred_price2 <- exp(testSet$pred_log_price2)
+
+testSet$pred_log_price_upper2 <- last_log_price + cumsum(testSet$pred_log_upper2)
+testSet$pred_price_upper2 <- exp(testSet$pred_log_price_upper2)
+
+testSet$pred_log_price_lower2 <- last_log_price + cumsum(testSet$pred_log_lower2)
+testSet$pred_price_lower2 <- exp(testSet$pred_log_price_lower2)
+
+# gam3
+preds3 <- predict(gam_model3, newdata = testSet, se.fit = TRUE)
+
+testSet$pred_log3 <- preds3$fit
+testSet$pred_log_upper3 <- preds3$fit + 1.96 * preds3$se.fit
+testSet$pred_log_lower3 <- preds3$fit - 1.96 * preds3$se.fit
+
+testSet$pred_log_price3 <- last_log_price + cumsum(testSet$pred_log3)
+testSet$pred_price3 <- exp(testSet$pred_log_price3)
+
+testSet$pred_log_price_upper3 <- last_log_price + cumsum(testSet$pred_log_upper3)
+testSet$pred_price_upper3 <- exp(testSet$pred_log_price_upper3)
+
+testSet$pred_log_price_lower3 <- last_log_price + cumsum(testSet$pred_log_lower3)
+testSet$pred_price_lower3 <- exp(testSet$pred_log_price_lower3)
+```
+
+```{r}
+## DO NOT KEEP
+
+ggplot(testSet, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual"), size = 1) +
+  geom_line(aes(y = pred_price, color = "Predicted"), size = 1) +
+  geom_line(aes(y = pred_price_upper), linetype = "dashed", color = "blue") +
+  geom_line(aes(y = pred_price_lower), linetype = "dashed", color = "blue") +
+  labs(title = "Actual vs. Predicted Price with 95% Prediction Interval",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
 ```
 
 ```{r}
@@ -683,93 +766,139 @@ ggplot(testSet, aes(x = Time)) +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
 ```
-```{r}
-rmse(testSet$month_Price, testSet$pred_price)
-```
-
-
-## 2.6 XGBoost Model
-```{r}
-trainSet$Lag1 <- lag(trainSet$diff_log_price, 1)
-trainSet$Lag12 <- lag(trainSet$diff_log_price, 12)
-testSet$Lag1 <- lag(testSet$diff_log_price, 1)
-testSet$Lag12 <- lag(testSet$diff_log_price, 12)
-
-predictors <- c("Time", "Avg_Temp", "exchange_rate", "Lag1", "Lag12")
-target <- "diff_log_price"
-```
 
 ```{r}
-train_data <- trainSet[complete.cases(trainSet[, c(predictors, target)]), ]
-test_data <- testSet[complete.cases(testSet[, predictors]), ]
-
-train_data <- train_data |>
-  mutate(across(all_of(predictors), as.numeric)) 
-test_data <- test_data |>
-  mutate(across(all_of(predictors), as.numeric))
-
-# Convert to DMatrix (XGBoost's optimized format)
-dtrain <- xgb.DMatrix(
-  data = as.matrix(train_data[, predictors]),
-  label = train_data[[target]]
-)
-```
-
-```{r}
-params <- list(
-  objective = "reg:squarederror",  # For regression
-  eta = 0.05,                      # Learning rate (lower for time series)
-  max_depth = 6,                   # Tree depth (avoid overfitting)
-  subsample = 0.8,                 # Random subset of data per tree
-  colsample_bytree = 0.8,          # Random subset of features per tree
-  gamma = 1,                       # Minimum loss reduction for splits
-  min_child_weight = 5             # Prevent overfitting to small groups
-)
-
-set.seed(123)
-xgb_model <- xgb.train(
-  params,
-  data = dtrain,
-  nrounds = 1000,                  # Large number (early stopping will handle)
-  watchlist = list(train = dtrain),
-  early_stopping_rounds = 50,      # Stop if no improvement for 50 rounds
-  print_every_n = 10
-)
-```
-
-```{r}
-dtest <- xgb.DMatrix(as.matrix(test_data[, predictors]))
-test_data$pred_diff_log <- predict(xgb_model, dtest)
-
-# Convert to actual price predictions
-test_data <- test_data %>%
-  mutate(
-    pred_log_price = last_log_price + cumsum(pred_diff_log),  # Only if modeling differences
-    pred_price = exp(pred_log_price)
-  )
-```
-
-```{r}
-ggplot(test_data, aes(x = Time)) +
+ggplot(testSet2, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
-  geom_line(aes(y = pred_price, color = "Predicted")) +
-  labs(title = "XGBoost: Actual vs. Predicted Price",
+  geom_line(aes(y = pred_price2, color = "Predicted")) +
+  labs(title = "Actual vs. Predicted Price", 
        x = "Time", y = "Price") +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
 ```
 
+```{r}
+ggplot(testSet2, aes(x = Time)) +
+  geom_line(aes(y = month_Price, color = "Actual")) +
+  geom_line(aes(y = pred_price3, color = "Predicted")) +
+  labs(title = "Actual vs. Predicted Price", 
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
 
 ```{r}
-# xgb = XGBClassifier(random_state=42)
-# xgb.fit(predictors, target)
+anova(gam_model, gam_model2, gam_model3)
+```
+
+```{r}
+# RMSE
+sqrt(mean((testSet$month_Price - testSet$pred_price)^2))
+sqrt(mean((testSet2$month_Price - testSet2$pred_price2)^2))
+sqrt(mean((testSet2$month_Price - testSet2$pred_price3)^2))
 ```
 
 
+## 2.6 Walk-Forward Validation with XGBoost Model
+### 2.6.1 Fit and Forecast
+```{r}
+ntest <- nrow(data) - cutoff
+predictions <- c()
+actuals <- c()
+dates <- c()
+```
 
+```{r}
+data$monthFac <- as.factor(format(data$Time, "%m"))
+data$Time <- as.numeric(as.Date(data$Time))
+data$monthFac <- as.numeric(data$monthFac)
+data$log_exchange_rate <- log(data$exchange_rate)
+features <- c("monthFac", "Time", "Avg_Temp", "log_exchange_rate")
+for (i in 1:ntest) {
+  train_data <- data[1:(cutoff + i - 1), ]
+  test_data <- data[(cutoff + i), ]
+  x_train <- train_data %>% select(all_of(features))
+  y_train <- train_data$log_price
+  x_test <- test_data %>% select(all_of(features))
+  dtrain <- xgb.DMatrix(data = as.matrix(x_train), label = y_train)
+  dtest <- xgb.DMatrix(data = as.matrix(x_test))
+  xgb_model <- xgboost(data = dtrain, nrounds = 100, objective = "reg:squarederror", verbose = 0)
+  pred_log <- predict(xgb_model, dtest)
+  pred_price <- exp(pred_log)
+  predictions <- c(predictions, pred_price)
+  actuals <- c(actuals, exp(test_data$log_price))
+  dates <- c(dates, test_data$Time)
+}
 
+xgb_walk_df <- tibble(Time = as.Date(dates),
+                      Actual = actuals,
+                      Predicted = predictions)
+```
 
+```{r}
+ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")) + 
+  geom_line(aes(y = Predicted, color = "XGBoost Prediction")) +
+  labs(title = "Actual vs. Predicted Price (XGBoost)", x = "Time", y = "Price") + 
+  scale_color_manual(values = c("Actual" = "black", "XGBoost Prediction" = "red")) +
+  theme_minimal()
+```
 
+```{r}
+# RMSE
+sqrt(mean((xgb_walk_df$Actual - xgb_walk_df$Predicted)^2))
+```
 
+# 3. Prediction
+```{r}
+# Predict 12 months
+future_months <- 12
 
+last_row <- data[nrow(data), ]
+future_predictions <- c()
+future_dates <- c()
+
+for (i in 1:future_months) {
+  future_time <- last_row$Time + (i * 30)
+  future_monthFac <- as.numeric(format(as.Date(future_time, origin = "1970-01-01"), "%m"))
+
+  future_data <- last_row
+  future_data$Time <- future_time
+  future_data$monthFac <- future_monthFac
+
+  x_future <- future_data %>% select(all_of(features))
+  dfuture <- xgb.DMatrix(data = as.matrix(x_future))
+
+  pred_log_future <- predict(xgb_model, dfuture)
+  pred_price_future <- exp(pred_log_future)
+
+  future_predictions <- c(future_predictions, pred_price_future)
+  future_dates <- c(future_dates, as.Date(future_time, origin = "1970-01-01"))
+
+  last_row$log_price <- pred_log_future
+}
+
+future_xgb_df <- tibble(Time = as.Date(future_dates),
+                        Predicted = future_predictions)
+
+combined_df <- bind_rows(xgb_walk_df, future_xgb_df)
+```
+
+```{r}
+forecast_start <- min(future_xgb_df$Time)
+forecast_end <- max(future_xgb_df$Time)
+
+ggplot(combined_df, aes(x = Time)) + 
+  geom_rect(aes(xmin = forecast_start, xmax = forecast_end, ymin = -Inf, ymax = Inf), 
+            fill = "lightgray", alpha = 0.3) + 
+  geom_line(aes(y = Actual, color = "Actual"), na.rm = TRUE) +
+  geom_line(aes(y = Predicted, color = "Predicted"), linetype = "dashed") +
+  labs(title = "Future Predictions (12 months) using XGBoost Walk-Forward Forecast",
+       x = "Time", y = "Price") +
+  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  theme_minimal()
+```
+
+```{r}
+summary(combined_df)
+```
 
