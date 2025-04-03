@@ -1,6 +1,6 @@
 ---
 title: "STA457 Project"
-author: "Xing Yu Wang"
+author: "Xingyu Wang, Xinyue Tao"
 date: "2025-03-29"
 output: pdf_document
 ---
@@ -447,9 +447,8 @@ ggplot() +
     "Actual" = "black",
     "Forecast" = "red"))
 ```
-## 2.3 GARCH Model
-### 2.3.1 GARCH Parameters (With Xreg)
-
+## 2.3 ARMAX-GARCH Model
+### 2.3.1 ARMAX-GARCH Parameters
 ```{r}
 # xreg_matrix is the same as arimax
 p = 0:3
@@ -469,7 +468,7 @@ aramx.garch.q <- q[aic.armax.min_index[2]]
 sprintf("Selected order for ARMA: p = %d, q = %d", aramx.garch.p, aramx.garch.q)
 ```
 
-This is the same as what we have for ARIMAX
+This is the same as what we have for ARIMAX. Then we use the similar method, where we fix the armax order, and systematically search for the combination of orders for garch configuration with smallest AIC.
 
 ```{r}
 m = 1:3
@@ -564,7 +563,7 @@ ggplot() +
   scale_color_manual(values = c("Actual" = "grey", "Fitted" = "red"))
 ```
 
-### 2.3.2 GARCH Forecast with param selection (With Xreg)
+### 2.3.2 ARMAX-GARCH Forecast
 ```{r}
 # multi-step forecast
 ngarchfore = length(testSet$diff_log_price)
