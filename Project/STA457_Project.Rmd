@@ -599,7 +599,7 @@ fore.garch.dl = ugarchforecast(model.armax.garch,
                               external.forecasts = list(mreg=xreg_test_matrix))
 fore.garch.dl.data <- as.numeric(fore.garch.dl@forecast$seriesFor)
 last_log_price <- tail(trainSet$log_price, 1)
-forecast.armax.garch.multi <- tail(trainSet$month_Price, 1)*exp(cumsum(fore.garch.dl.data))
+forecast.armax.garch.multi <- exp(cumsum(fore.garch.dl.data) + last_log_price)
 ```
 
 ```{r}
@@ -628,8 +628,6 @@ ggplot() +
   theme_minimal() +
   scale_color_manual(values = c("Actual" = "black", "Forecast" = "red"))
 ```
-
-RMSE below shows the forecast ability of the final model with one-step forecast
 
 ```{r}
 model.armax.garch.fitted <- as.numeric(fitted(model.armax.garch))
