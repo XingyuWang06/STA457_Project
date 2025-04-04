@@ -26,6 +26,7 @@ library(caret)
 library(rugarch)
 library(tibble)
 library(xts)
+library(gridExtra)
 ```
 
 # 1. EDA
@@ -302,12 +303,16 @@ actual_ets_ts <- ts(actual_price, start = start(data_test_ts), frequency = 12)
 
 ```{r}
 # ANA
-autoplot(forecast_ets_ts, series = "Predicted") + 
-  autolayer(actual_ets_ts, series = "Actual", color = "blue") +
-  ggtitle("Forecast vs Actual Prices") +
+p1 <- autoplot(forecast_ets_ts, series = "Prediction") + 
+  autolayer(actual_ets_ts, series = "Actual") +
+  ggtitle("ETS(ANA): Predicted vs Actual Prices") +
   ylab("Price") +
   xlab("Time") +
-  theme_minimal()
+  theme_minimal()+
+  scale_color_manual(values = c(
+    "Actual" = "black",
+    "Prediction" = "red"))
+p1
 ```
 
 ```{r}
@@ -457,11 +462,11 @@ test.arimax.df <- tibble(
 ```
 
 ```{r}
-ggplot() +
+p2 <- ggplot() +
   geom_line(data = test.arimax.df, aes(x = Time, y = Price, color = "Actual")) +
-  geom_line(data = forecast.arimax.df, aes(x = Time, y = Price, color = "Forecast")) +
+  geom_line(data = forecast.arimax.df, aes(x = Time, y = Price, color = "Prediction")) +
   labs(
-    title = "ARIMAX(2,0,3) Forecast vs Actual Monthly Prices", 
+    title = "ARIMAX(2,0,3): Predicted vs Actual Prices", 
     y = "Price", 
     x = "Time",
     color = "Legend"
@@ -469,7 +474,8 @@ ggplot() +
   theme_minimal() +
   scale_color_manual(values = c(
     "Actual" = "black",
-    "Forecast" = "red"))
+    "Prediction" = "red"))
+p2
 ```
 ## 2.3 ARMAX-GARCH Model
 ### 2.3.1 ARMAX-GARCH Parameters
@@ -615,18 +621,18 @@ test.garch.df <- tibble(
 ```
 
 ```{r}
-library(ggplot2)
-ggplot() +
+p3 <- ggplot() +
   geom_line(data = test.garch.df, aes(x = Time, y = Price, color = "Actual")) +
-  geom_line(data = forecast.garch.multi.df, aes(x = Time, y = Price, color = "Forecast")) +
+  geom_line(data = forecast.garch.multi.df, aes(x = Time, y = Price, color = "Prediction")) +
   labs(
-    title = "sGARCH(1,1) with ARFIMA(2,0,3) Multi-steps Forecast vs Actual Monthly Prices", 
+    title = "sGARCH(1,1) with ARFIMA(2,0,3): Predicted vs Actual Prices", 
     y = "Price", 
     x = "Time",
     color = "Legend"
   ) +
   theme_minimal() +
-  scale_color_manual(values = c("Actual" = "black", "Forecast" = "red"))
+  scale_color_manual(values = c("Actual" = "black", "Prediction" = "red"))
+p3
 ```
 
 RMSE below shows the forecast ability of the final model with one-step forecast
@@ -647,8 +653,8 @@ mape(testSet$month_Price, forecast.armax.garch.multi[1:length(testSet$Time)])
 ```
 
 
-## 2.5 GAM Model
-### 2.5.1 Fit Model
+## 2.4 GAM Model
+### 2.4.1 Fit Model
 ```{r}
 trainSet$Time = as.Date(trainSet$Time)
 trainSet$monthFac = as.factor(format(trainSet$Time, "%m"))
@@ -684,7 +690,7 @@ summary(gam_model2)
 summary(gam_model3)
 ```
 
-### 2.5.2 Forecast and Plot
+### 2.4.2 Forecast and Plot
 ```{r}
 testSet$Time = as.Date(testSet$Time)
 testSet$monthFac = as.factor(format(testSet$Time, "%m"))
@@ -718,27 +724,28 @@ testSet2$pred_price3 <- exp(testSet2$pred_log_price3)
 ggplot(testSet, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
   geom_line(aes(y = pred_price, color = "Predicted")) +
-  labs(title = "Actual vs. Predicted Price", 
+  labs(title = "GAM Model 1: Forecast vs Actual Prices", 
        x = "Time", y = "Price") +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
 ```
 
 ```{r}
-ggplot(testSet2, aes(x = Time)) +
+p4 <- ggplot(testSet2, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
-  geom_line(aes(y = pred_price2, color = "Predicted")) +
-  labs(title = "Actual vs. Predicted Price", 
+  geom_line(aes(y = pred_price2, color = "Prediction")) +
+  labs(title = "GAM: Predicted vs Actual Prices", 
        x = "Time", y = "Price") +
-  scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
+  scale_color_manual(values = c("Actual" = "black", "Prediction" = "red")) +
   theme_minimal()
+p4
 ```
 
 ```{r}
 ggplot(testSet2, aes(x = Time)) +
   geom_line(aes(y = month_Price, color = "Actual")) +
   geom_line(aes(y = pred_price3, color = "Predicted")) +
-  labs(title = "Actual vs. Predicted Price", 
+  labs(title = "GAM Model 3: Actual vs. Predicted Price", 
        x = "Time", y = "Price") +
   scale_color_manual(values = c("Actual" = "black", "Predicted" = "red")) +
   theme_minimal()
@@ -766,8 +773,8 @@ mean(abs((testSet2$month_Price - testSet2$pred_price3) / testSet2$month_Price)) 
 ```
 
 
-## 2.6 Walk-Forward Validation with XGBoost Model
-### 2.6.1 Fit and Forecast
+## 2.5 Walk-Forward Validation with XGBoost Model
+### 2.5.1 Fit and Forecast
 ```{r}
 ntest <- nrow(data) - cutoff
 predictions <- c()
@@ -803,11 +810,12 @@ xgb_walk_df <- tibble(Time = as.Date(dates),
 ```
 
 ```{r}
-ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")) + 
-  geom_line(aes(y = Predicted, color = "XGBoost Prediction")) +
-  labs(title = "Actual vs. Predicted Price (XGBoost)", x = "Time", y = "Price") + 
-  scale_color_manual(values = c("Actual" = "black", "XGBoost Prediction" = "red")) +
+p5 <- ggplot(xgb_walk_df, aes(x = Time)) + geom_line(aes(y = Actual, color = "Actual")) + 
+  geom_line(aes(y = Predicted, color = "Prediction")) +
+  labs(title = "XGBoost: Predicted vs Actual Prices", x = "Time", y = "Price") + 
+  scale_color_manual(values = c("Actual" = "black", "Prediction" = "red")) +
   theme_minimal()
+p5
 ```
 
 ```{r}
@@ -819,6 +827,22 @@ mean(abs(xgb_walk_df$Actual - xgb_walk_df$Predicted))
 
 # MAPE
 mean(abs((xgb_walk_df$Actual - xgb_walk_df$Predicted) / xgb_walk_df$Actual)) * 100
+```
+
+## 2.6 Model Selection
+
+```{r}
+p1 <- p1 + theme(text = element_text(size = 8))  
+p2 <- p2 + theme(text = element_text(size = 8))
+p3 <- p3 + theme(text = element_text(size = 8))
+p4 <- p4 + theme(text = element_text(size = 8))
+p5 <- p5 + theme(text = element_text(size = 8))
+
+p.combined <- grid.arrange(p1, p4, p2, p5, p3, 
+             ncol = 2, 
+             widths = c(2, 2),
+             heights = c(1.2, 1.2, 1.2))
+ggsave("plot_all_models.png", p.combined, dpi = 300)
 ```
 
 # 3. Prediction
