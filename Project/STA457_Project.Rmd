@@ -1,6 +1,6 @@
 ---
 title: "STA457 Project"
-author: "Xingyu Wang, Xinyue Tao"
+author: "Xing Yu Wang, Carina Wang, Xinyue Tao, Qinyu Qu"
 date: "2025-03-29"
 output: pdf_document
 ---
