@@ -625,7 +625,7 @@ p3 <- ggplot() +
   geom_line(data = test.garch.df, aes(x = Time, y = Price, color = "Actual")) +
   geom_line(data = forecast.garch.multi.df, aes(x = Time, y = Price, color = "Prediction")) +
   labs(
-    title = "sGARCH(1,1) with ARFIMA(2,0,3): Predicted vs Actual Prices", 
+    title = "GARCH(1,1) with ARMAX(2,3): Predicted vs Actual Prices", 
     y = "Price", 
     x = "Time",
     color = "Legend"
